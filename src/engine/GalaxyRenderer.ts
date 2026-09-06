@@ -20,9 +20,12 @@ export interface RenderedGalaxyNode {
 
 const GALAXY_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
+  #include <common>
+  #include <logdepthbuf_pars_vertex>
   void main() {
     vUv = uv;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    #include <logdepthbuf_vertex>
   }
 `;
 
@@ -45,6 +48,8 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
   uniform int uMorphology;
 
   varying vec2 vUv;
+  #include <common>
+  #include <logdepthbuf_pars_fragment>
 
   float hash21(vec2 p) {
     p = fract(p * vec2(123.34, 345.45));
@@ -71,10 +76,23 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
     return smoothstep(0.48, 0.92, wave);
   }
 
+  float fractal(vec2 p) {
+    float sum = 0.0, amplitude = 0.5;
+    for (int i=0; i<5; i++) {
+      sum += valueNoise(p)*amplitude;
+      p = mat2(1.62,1.17,-1.17,1.62)*p+13.0;
+      amplitude *= 0.5;
+    }
+    return sum;
+  }
+
   void main() {
     vec2 p = vUv * 2.0 - 1.0;
     float radius = length(p);
     if (radius > 1.0) discard;
+    #include <logdepthbuf_fragment>
+    float cloud = fractal(p*19.0+uSeed);
+    float fine = valueNoise(p*240.0+uSeed);
 
     float n = max(uSersicIndex, 0.6);
     // Ciotti-Bertin approximation to the Sersic b_n coefficient.
@@ -87,18 +105,19 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
     float arms = 0.0;
     if (uMorphology == 0 || uMorphology == 1) {
       arms = mix(
-        armPattern(p, radians(uPitch0)),
-        armPattern(p, radians(uPitch1)),
+        armPattern(p + (cloud-0.5)*0.012, radians(uPitch0)),
+        armPattern(p + (cloud-0.5)*0.012, radians(uPitch1)),
         0.5 + 0.5 * sin(uSeed)
       );
     }
 
     float structure = 1.0;
     if (uMorphology == 3) {
-      structure = 0.70 + 0.30 * valueNoise(p * 5.0 + uSeed);
-      structure *= 0.82 + 0.18 * valueNoise(p * 13.0 - uSeed);
+      structure = 0.35 + 1.6 * cloud;
+      structure *= 0.7 + fine*0.6;
     } else {
-      structure += uArmContrast * arms * (0.55 + 0.45 * valueNoise(p * 7.0 + uSeed));
+      structure += uArmContrast * arms * (0.35 + 1.5 * cloud);
+      structure *= 0.86 + fine*0.28;
     }
 
     if (uMorphology == 1) {
@@ -113,11 +132,12 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
     // Dust is an optical-depth attenuation, not a black polygon layered on top.
     float inclination = clamp(uInclination / 90.0, 0.0, 1.0);
     float dustHalfWidth = mix(0.20, 0.085, smoothstep(0.45, 0.95, inclination));
-    float projectedLane = exp(-pow(abs(p.y) / dustHalfWidth, 2.0));
+    float projectedLane = exp(-pow(abs(p.y+(cloud-0.5)*0.035) / dustHalfWidth, 2.0));
     projectedLane *= exp(-pow(p.x / 0.92, 2.0));
     projectedLane *= smoothstep(0.52, 0.92, inclination);
-    float faceOnDust = arms * disk * (1.0 - smoothstep(0.55, 0.90, inclination)) * 0.38;
-    float opticalDepth = uDustOpacity * (projectedLane * (0.65 + 0.35 * disk) + faceOnDust);
+    float innerArms = armPattern(p * 1.07, radians(uPitch0));
+    float faceOnDust = innerArms * disk * (1.0 - smoothstep(0.55, 0.90, inclination));
+    float opticalDepth = uDustOpacity * (projectedLane * (0.65 + 0.35 * disk) + faceOnDust) * (0.7+cloud*1.8);
     float dust = exp(-opticalDepth);
 
     float intensity = max(0.0, (bulge * uBulgeFraction + disk * (1.0 - uBulgeFraction) * structure) * dust);
@@ -126,6 +146,9 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
 
     float young = clamp(arms * 0.72 + (1.0 - uBulgeFraction) * 0.12, 0.0, 1.0);
     vec3 color = mix(uPrimary, uSecondary, young);
+    color *= exp(-vec3(0.10,0.20,0.36)*opticalDepth);
+    float clusters = smoothstep(0.72,0.90,fine)*arms*disk;
+    color += vec3(0.18,0.035,0.065)*clusters;
     float radiance = intensity * uPhotometricFlux * uExposure;
     float alpha = clamp(intensity * uOpacity, 0.0, 1.0);
 

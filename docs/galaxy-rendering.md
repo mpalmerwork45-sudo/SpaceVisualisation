@@ -89,6 +89,22 @@ another orientation. The separate Galactic Pole top-view preset is unchanged.
 
 ## Planet inspection
 
+## Deep-space object forms
+
+Nebulae use transparent 3D volumes with front-to-back integration, not square
+point sprites. Morphologies distinguish ionised planetary shells, supernova
+filaments, reflection clouds and dusty emission regions. The obscured Galactic
+nucleus is a faint cloud, not a visible sphere representing the black hole.
+These are illustrative models with catalogue positions and angular extents;
+small-scale gas structures are not measured reconstructions.
+
+Galaxy surfaces include multiscale stellar texture, clumped arm structure,
+offset dust lanes, extinction reddening and restrained star-forming knots.
+Catalogue stars remain unresolved points when narrowing the field of view.
+Sky-object inspection can narrow below one degree to resolve compact nebulae.
+
+## Planet inspection
+
 Planets have procedural rocky terrain, cloud decks, gas-giant belts, ocean
 reflection and atmospheric rim shading. Saturn's ring shader includes radial
 structure, a Cassini-like division and the planet's shadow. Planet shading uses

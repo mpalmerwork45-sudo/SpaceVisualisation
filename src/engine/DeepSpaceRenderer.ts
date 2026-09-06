@@ -5,15 +5,18 @@ import {
   equatorialToCartesian,
   equatorialToEcliptic,
   equatorialToGalactic,
+  positionAngleBasis,
   scaleDistance,
   ViewMode
 } from '../utils/coordinates';
 import { PlaneAlignment } from './StarRenderer';
 import { GalaxyRenderer } from './GalaxyRenderer';
+import { createNebulaVolume } from './NebulaVolume';
 
 export class DeepSpaceRenderer {
   public group: THREE.Group;
   public galaxyRenderer: GalaxyRenderer;
+  private exposure = 0.72;
   public objectsMap: Map<string, { data: DeepSpaceObjectData; position: THREE.Vector3; mesh: THREE.Object3D }> = new Map();
 
   constructor() {
@@ -40,9 +43,15 @@ export class DeepSpaceRenderer {
       }
 
       let mesh: THREE.Object3D;
-      if (dso.type === 'nebula') {
+      if (dso.type !== 'galaxy') {
         mesh = this.createNebulaMesh(dso, distance);
         mesh.position.copy(position);
+        const axes = positionAngleBasis(dso.ra, dso.dec, dso.positionAngleDeg ?? 0);
+        const transform = (v: THREE.Vector3) => planeAlignment === 'galactic' ? equatorialToGalactic(v)
+          : planeAlignment === 'ecliptic' ? equatorialToEcliptic(v) : v;
+        mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+          transform(axes.major), transform(axes.minor), position.clone().normalize()
+        ));
         this.group.add(mesh);
       } else {
         const galaxyNode = this.galaxyRenderer.createGalaxy(dso, viewMode, planeAlignment, position);
@@ -55,11 +64,26 @@ export class DeepSpaceRenderer {
   }
 
   public setExposure(exposure: number) {
+    this.exposure = exposure;
     this.galaxyRenderer.setExposure(exposure);
+    this.objectsMap.forEach(node => {
+      if (node.mesh instanceof THREE.Mesh && node.mesh.material instanceof THREE.ShaderMaterial) {
+        node.mesh.material.uniforms.uExposure.value = exposure;
+      }
+    });
   }
 
   public animate(_timeSec: number, camera?: THREE.PerspectiveCamera, viewMode: ViewMode = 'linear') {
-    if (camera) this.galaxyRenderer.updateCloseLod(camera, viewMode);
+    if (camera) {
+      this.galaxyRenderer.updateCloseLod(camera, viewMode);
+      this.objectsMap.forEach(node => {
+        if (node.mesh instanceof THREE.Mesh && node.mesh.material instanceof THREE.ShaderMaterial) {
+          node.mesh.updateWorldMatrix(true,false);
+          node.mesh.material.uniforms.uCamera.value.copy(camera.position);
+          node.mesh.worldToLocal(node.mesh.material.uniforms.uCamera.value);
+        }
+      });
+    }
   }
 
   public dispose() {
@@ -68,52 +92,13 @@ export class DeepSpaceRenderer {
     this.objectsMap.clear();
   }
 
-  private createNebulaMesh(dso: DeepSpaceObjectData, distance: number): THREE.Group {
-    const group = new THREE.Group();
-    // Preserve the catalogue's apparent extent in every mode. In linear
-    // mode this reduces to the physical diameter implied by distance and
-    // angular size; in compressed/sky modes it scales to the rendered shell.
+  private createNebulaMesh(dso: DeepSpaceObjectData, distance: number): THREE.Mesh {
     const diameter = angularDiameterToWorldSize(dso.angularSizeArcmin, distance);
-    const radius = Math.max(0.4, diameter * 0.5);
-    const particleCount = 180;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const colors = new Float32Array(particleCount * 3);
-    const c1 = new THREE.Color(dso.colorHex);
-    const c2 = new THREE.Color(dso.secondaryColorHex);
-    const random = this.seededRandom(dso.id);
-
-    for (let i = 0; i < particleCount; i++) {
-      const r = Math.pow(random(), 0.62) * radius;
-      const theta = random() * Math.PI * 2;
-      const phi = Math.acos(2 * random() - 1);
-      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-      positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-      positions[i * 3 + 2] = r * Math.cos(phi);
-
-      const col = c1.clone().lerp(c2, random());
-      colors[i * 3] = col.r;
-      colors[i * 3 + 1] = col.g;
-      colors[i * 3 + 2] = col.b;
-    }
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const material = new THREE.PointsMaterial({
-      size: Math.max(0.04, radius * 0.08),
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.42,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true
-    });
-
-    const points = new THREE.Points(geometry, material);
-    points.userData = { deepObjectData: dso, type: 'deepSpace' };
-    group.add(points);
-    return group;
+    const mesh = createNebulaVolume(dso, this.exposure);
+    const aspect = (dso.angularSizeMinorArcmin ?? dso.angularSizeArcmin) / dso.angularSizeArcmin;
+    mesh.scale.set(diameter * 0.5, diameter * aspect * 0.5, diameter * 0.35);
+    mesh.userData = { deepObjectData: dso, type: 'deepSpace' };
+    return mesh;
   }
 
   private disposeNebulaChildren() {

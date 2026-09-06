@@ -349,7 +349,7 @@ export class SpaceEngine {
     this.targetCameraTarget.set(0, 0, 0);
     this.targetCameraRadius = 0.01;
     this.setTargetViewDirection(direction);
-    this.targetCameraFov = THREE.MathUtils.clamp(fieldOfViewDeg, 1, 55);
+    this.targetCameraFov = THREE.MathUtils.clamp(fieldOfViewDeg, 0.05, 75);
   }
 
   /** Focus an extended catalogue object at a useful multiple of its angular size. */

@@ -133,6 +133,17 @@ export class StarRenderer {
     this.starsMap.forEach((node) => {
       const distToCam = camera.position.distanceTo(node.position);
 
+      if (node.data.id !== 'sol') {
+        // Distant stars remain unresolved when the field of view narrows.
+        // Otherwise telescope-like zoom turns catalogue points into huge discs.
+        const height = typeof window === 'undefined' ? 1000 : window.innerHeight;
+        const pixelRadius = THREE.MathUtils.clamp(2.3 - node.data.mag * 0.18, 0.65, 2.6);
+        const radius = distToCam * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov/2)) * pixelRadius / height;
+        const geometryRadius = (node.mesh.geometry as THREE.SphereGeometry).parameters.radius;
+        node.mesh.scale.setScalar(radius / geometryRadius);
+        return;
+      }
+
       // Dynamically scale mesh down as camera approaches so star stays a clean pinpoint disc
       // rather than expanding into a giant polygon sphere on screen
       const scaleFactor = Math.min(1.0, Math.max(0.0001, distToCam * 0.015));
