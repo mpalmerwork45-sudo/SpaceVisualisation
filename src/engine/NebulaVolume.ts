@@ -26,7 +26,9 @@ const fragmentShader = /* glsl */ `
   void main() {
     vec3 ray = normalize(vLocal - uCamera);
     float b = dot(uCamera, ray);
-    float discriminant = b*b - dot(uCamera,uCamera) + 1.0;
+    // Avoid subtracting two huge squared distances for arcminute-sized objects.
+    vec3 closest = uCamera - ray*b;
+    float discriminant = 1.0 - dot(closest,closest);
     if (discriminant < 0.0) discard;
     float entry = max(0.0, -b - sqrt(discriminant));
     float end = -b + sqrt(discriminant);
