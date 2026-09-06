@@ -121,9 +121,13 @@ export class UIManager {
               <span class="toggle-label">Distance Rings</span>
             </label>
 
-            <button id="btn-audio" class="btn-icon" title="Toggle Cosmic Ambient Soundscape">
-              🎵 Sound: Off
+            <button id="btn-audio" class="btn-icon" title="Play an ambient soundtrack of slow harmonies, distant bells and deep undertones" aria-pressed="false" aria-controls="sound-controls">
+              ♫ Soundtrack: Off
             </button>
+            <div id="sound-controls" class="sound-controls" hidden>
+              <label>Volume <input id="sound-volume" type="range" min="0" max="100" value="35" aria-label="Soundtrack volume" /><output id="sound-volume-value">35%</output></label>
+              <label title="Adds a colder, more dissonant undertone">Intensity <input id="sound-intensity" type="range" min="0" max="100" value="45" aria-label="Soundtrack intensity" /></label>
+            </div>
 
             <button id="btn-exposure" class="btn-icon" title="Switch between a dark-adapted eye view and an enhanced optical exposure" aria-pressed="false">
               🌙 Eye Exposure
@@ -402,11 +406,36 @@ export class UIManager {
       this.engine.gridRenderer.setRingsVisible((e.target as HTMLInputElement).checked);
     });
 
-    const btnAudio = document.getElementById('btn-audio')!;
-    btnAudio.addEventListener('click', () => {
-      const isPlaying = this.audioEngine.toggleAudio();
-      btnAudio.textContent = isPlaying ? '🎵 Sound: Playing' : '🎵 Sound: Off';
-      btnAudio.classList.toggle('active', isPlaying);
+    const btnAudio = document.getElementById('btn-audio') as HTMLButtonElement;
+    btnAudio.addEventListener('click', async () => {
+      btnAudio.disabled = true;
+      try {
+        const isPlaying = await this.audioEngine.toggleAudio();
+        btnAudio.textContent = isPlaying ? '♫ Soundtrack: On' : '♫ Soundtrack: Off';
+        btnAudio.classList.toggle('active', isPlaying);
+        btnAudio.setAttribute('aria-pressed', String(isPlaying));
+        document.getElementById('sound-controls')!.hidden = !isPlaying;
+      } catch (error) {
+        btnAudio.textContent = 'Sound unavailable · Retry';
+        console.warn('Unable to start soundtrack.', error);
+      } finally {
+        btnAudio.disabled = false;
+      }
+    });
+    document.getElementById('sound-volume')!.addEventListener('input', event => {
+      const value = Number((event.target as HTMLInputElement).value);
+      this.audioEngine.setVolume(value/100);
+      document.getElementById('sound-volume-value')!.textContent = `${value}%`;
+    });
+    document.getElementById('sound-intensity')!.addEventListener('input', event => {
+      this.audioEngine.setIntensity(Number((event.target as HTMLInputElement).value)/100);
+    });
+    window.addEventListener('pagehide', () => {
+      this.audioEngine.dispose();
+      btnAudio.textContent = '♫ Soundtrack: Off';
+      btnAudio.classList.remove('active');
+      btnAudio.setAttribute('aria-pressed','false');
+      document.getElementById('sound-controls')!.hidden = true;
     });
 
     const btnExposure = document.getElementById('btn-exposure')!;
