@@ -165,6 +165,15 @@ export class UIManager {
         <div id="axis-telemetry-readout" class="axis-telemetry-readout">
           Solar System · Facing the Galactic centre
         </div>
+        <div class="view-angle-controls">
+          <span>Orbit view</span>
+          <button class="btn-axis" data-elevation="75" title="Look down at the current focus without changing distance">Above</button>
+          <button class="btn-axis" data-elevation="0" title="View the current focus at the selected coordinate plane">Level</button>
+          <button class="btn-axis" data-elevation="-45" title="Look up at the current focus without changing distance">Below</button>
+          <label for="view-fov">Field of view</label>
+          <input id="view-fov" type="range" min="0" max="100" step="0.1" value="93.4" aria-label="Field of view" />
+          <output id="view-fov-value" for="view-fov">55°</output>
+        </div>
       </div>
 
       <!-- SPECTRAL FILTER BAR -->
@@ -218,6 +227,11 @@ export class UIManager {
     // Orbit angles describe camera position; telemetry describes the actual
     // inward line of sight, which is the opposite direction.
     const direction = this.engine.camera.getWorldDirection(new Vector3());
+    const fov = this.engine.targetCameraFov;
+    const fovSlider = document.getElementById('view-fov') as HTMLInputElement;
+    if (document.activeElement !== fovSlider) fovSlider.value = String(Math.log(fov/0.05)/Math.log(1800)*100);
+    document.getElementById('view-fov-value')!.textContent = `${fov < 1 ? fov.toFixed(2) : fov.toFixed(1)}°`;
+    fovSlider.setAttribute('aria-valuetext', `${fov.toFixed(2)} degrees`);
     const pitchDeg = Math.round(Math.asin(direction.y) * (180 / Math.PI));
     const yawRaw = ((Math.atan2(direction.z, direction.x) * (180 / Math.PI)) + 360) % 360;
     const yawDeg = Math.round(yawRaw) % 360;
@@ -309,6 +323,12 @@ export class UIManager {
     });
 
     // SINGLE AXIS TILT HUD BUTTON EVENTS
+    document.querySelectorAll<HTMLButtonElement>('[data-elevation]').forEach(button => {
+      button.addEventListener('click', () => this.engine.setOrbitElevation(Number(button.dataset.elevation)));
+    });
+    document.getElementById('view-fov')!.addEventListener('input', event => {
+      this.engine.setFieldOfView(0.05 * Math.pow(1800,Number((event.target as HTMLInputElement).value)/100));
+    });
     document.getElementById('btn-pitch-up')!.addEventListener('click', () => this.engine.adjustPitch(5));
     document.getElementById('btn-pitch-dn')!.addEventListener('click', () => this.engine.adjustPitch(-5));
     document.getElementById('btn-yaw-left')!.addEventListener('click', () => this.engine.adjustYaw(-5));

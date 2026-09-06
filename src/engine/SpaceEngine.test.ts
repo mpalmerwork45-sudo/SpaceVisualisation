@@ -68,4 +68,22 @@ describe('Solar System opening/reset preset', () => {
     const expected = centre.sub(before).normalize();
     expect(engine.camera.getWorldDirection(new THREE.Vector3()).distanceTo(expected)).toBeLessThan(1e-4);
   });
+
+  it('changes orbit elevation and optical framing independently of focus distance', () => {
+    const engine = cameraHarness();
+    const target = engine.targetCameraTarget.clone();
+    const distance = engine.targetCameraRadius;
+    const heading = engine.targetCameraTheta;
+    engine.setOrbitElevation(75);
+    engine.setFieldOfView(0.1);
+    expect(engine.targetCameraPhi).toBeCloseTo(Math.PI/12,8);
+    expect(engine.targetCameraRadius).toBe(distance);
+    expect(engine.targetCameraTarget.distanceTo(target)).toBe(0);
+    expect(engine.targetCameraTheta).toBe(heading);
+    expect(engine.targetCameraFov).toBe(0.1);
+    engine.setFieldOfView(NaN);
+    expect(engine.targetCameraFov).toBe(0.1);
+    engine.setFieldOfView(200);
+    expect(engine.targetCameraFov).toBe(90);
+  });
 });

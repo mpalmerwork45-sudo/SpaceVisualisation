@@ -87,8 +87,6 @@ ecliptic-aligned for planetary orbits; the camera direction is transformed into
 that frame. Startup applies the pose before rendering, without a glide from
 another orientation. The separate Galactic Pole top-view preset is unchanged.
 
-## Planet inspection
-
 ## Deep-space object forms
 
 Nebulae use transparent 3D volumes with front-to-back integration, not square
@@ -102,6 +100,11 @@ Galaxy surfaces include multiscale stellar texture, clumped arm structure,
 offset dust lanes, extinction reddening and restrained star-forming knots.
 Catalogue stars remain unresolved points when narrowing the field of view.
 Sky-object inspection can narrow below one degree to resolve compact nebulae.
+
+Above / Level / Below change the orbit elevation around the current focus,
+preserving distance and heading. The logarithmic field-of-view slider ranges
+from 0.05° for compact-object inspection to 90° for wide views, independently
+of orbit distance. Existing pitch, yaw, roll and drag controls remain available.
 
 ## Planet inspection
 

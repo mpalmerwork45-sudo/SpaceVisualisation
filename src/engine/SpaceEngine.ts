@@ -200,6 +200,19 @@ export class SpaceEngine {
     this.targetCameraRoll = 0;
   }
 
+  /** Orbit around the existing focus, keeping its distance and heading. */
+  public setOrbitElevation(degrees: number) {
+    if (!Number.isFinite(degrees)) return;
+    this.skyLookDirection = null;
+    this.targetCameraPhi = THREE.MathUtils.degToRad(90-THREE.MathUtils.clamp(degrees,-85,85));
+  }
+
+  /** Optical framing; independent of observer position and orbit radius. */
+  public setFieldOfView(degrees: number) {
+    if (!Number.isFinite(degrees)) return;
+    this.targetCameraFov = THREE.MathUtils.clamp(degrees,0.05,90);
+  }
+
   public turnAround180() {
     console.log('🔄 [SpaceEngine] Smoothly turning camera view around by 180 degrees.');
     if (this.skyLookDirection) this.skyLookDirection.negate();

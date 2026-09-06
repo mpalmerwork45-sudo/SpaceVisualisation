@@ -84,6 +84,11 @@ canvas {
   text-underline-offset: 2px;
 }
 
+.view-angle-controls { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid #a0b0d020; flex-wrap: wrap; color: #9cafc5; font-size: 10px; }
+.view-angle-controls input { width: 110px; accent-color: #87bacd; }
+.view-angle-controls output { min-width: 40px; color: #dce8ef; font-variant-numeric: tabular-nums; }
+.view-angle-controls label { margin-left: 8px; }
+
 .planet-nav {
   position: absolute;
   bottom: 66px;
