@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { DeepSpaceObjectData } from '../data/deepSpace';
 import { GALACTIC_DUST_GLSL } from './GalacticSkyModel';
+import { RADIATIVE_TRANSFER_GLSL } from './RadiativeTransfer';
 
 const vertexShader = /* glsl */ `
   varying vec3 vLocal;
@@ -22,6 +23,7 @@ const fragmentShader = /* glsl */ `
   #include <common>
   #include <logdepthbuf_pars_fragment>
   ${GALACTIC_DUST_GLSL}
+  ${RADIATIVE_TRANSFER_GLSL}
 
   void main() {
     vec3 ray = normalize(vLocal - uCamera);
@@ -87,15 +89,17 @@ const fragmentShader = /* glsl */ `
       density *= boundary;
       dust *= boundary;
       float extinction = density*0.6+dust;
-      float attenuation = exp(-extinction*stepSize*2.0);
-      light += transmission*colour*density*stepSize*2.0;
+      float tau = extinction*stepSize*2.0;
+      float attenuation = exp(-tau);
+      light += transmission*colour*density*stepSize*2.0*emissionIntegral(tau);
       transmission *= attenuation;
     }
-    float alpha = clamp(1.0-transmission,0.0,0.94);
+    float alpha = clamp(1.0-transmission,0.0,1.0);
     if (alpha < 0.002) discard;
     #include <logdepthbuf_fragment>
     float luminance = dot(light,vec3(0.2126,0.7152,0.0722));
-    light = mix(vec3(luminance),light,clamp(uExposure*0.65,0.25,1.0));
+    float colourResponse = mix(0.06,1.0,smoothstep(0.72,1.45,uExposure));
+    light = mix(vec3(luminance),light,colourResponse);
     gl_FragColor = vec4(light/max(alpha,0.01)*uExposure,alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>

@@ -581,6 +581,7 @@ export class SpaceEngine {
     // An all-sky panorama has angular coordinates, not a navigable distance.
     this.milkyWay.mesh.position.copy(this.camera.position);
     this.starField.points.position.copy(this.camera.position);
+    this.milkyWay.update(this.renderer, this.camera, this.viewMode);
 
     this.starRenderer.animate(this.camera);
     this.constellationRenderer.animate(elapsedTime);

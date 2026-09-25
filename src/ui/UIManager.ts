@@ -70,7 +70,7 @@ export class UIManager {
             <button id="btn-mode-log" class="btn-mode" title="Logarithmic distance compression showing local stars, nebulae and Andromeda on one map">
               🌀 Logarithmic
             </button>
-            <button id="btn-mode-real" class="btn-mode" title="Realistic sky dome rendering from Earth/Sol view">
+            <button id="btn-mode-real" class="btn-mode" title="Sol-centred angular sky with dim, nearly colourless eye exposure; a display approximation, not a long-exposure photograph">
               🔭 Realistic Sky
             </button>
           </div>
@@ -129,7 +129,7 @@ export class UIManager {
               <label title="Adds a colder, more dissonant undertone">Intensity <input id="sound-intensity" type="range" min="0" max="100" value="45" aria-label="Soundtrack intensity" /></label>
             </div>
 
-            <button id="btn-exposure" class="btn-icon" title="Switch between a dark-adapted eye view and an enhanced optical exposure" aria-pressed="false">
+            <button id="btn-exposure" class="btn-icon" title="Eye: faint, muted diffuse light. Enhanced: brighter photographic-style colour. Neither is a calibrated vision simulation." aria-pressed="false">
               🌙 Eye Exposure
             </button>
             <button id="btn-sky-source" class="btn-icon" title="Switch the Milky Way between a procedural render and an ESO photographic reference" aria-pressed="false">

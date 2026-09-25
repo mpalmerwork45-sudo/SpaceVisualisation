@@ -1,3 +1,8 @@
+import { RADIATIVE_TRANSFER_GLSL } from './RadiativeTransfer';
+
+export const LY_PER_KPC = 3261.563777;
+export const GALACTIC_CENTRE_KPC = 26700 / LY_PER_KPC;
+
 /** Galactic directions: +X centre, +Y north, +Z l=90. Angular cloud extents
  * are approximate landmark envelopes, not surveyed dust measurements. */
 export const GALACTIC_DUST_GLSL = /* glsl */ `
@@ -36,64 +41,76 @@ export const GALACTIC_DUST_GLSL = /* glsl */ `
                    + 1.8 * cloud(lb, vec2(5, 1), vec2(16, 3))
                    + 0.8 * cloud(lb, vec2(-7, 13), vec2(9, 6))
                    + 2.6 * cloud(lb, vec2(-57, -1), vec2(4, 3));
-    vec3 warp = vec3(fbm(direction*9.0), fbm(direction*9.0+23.0), fbm(direction*9.0-17.0));
-    float structure = fbm(direction * 28.0 + warp * 2.0)
-                    + fbm(direction * 180.0) * 0.18;
-    return envelope * (0.55 + smoothstep(0.30, 0.75, structure) * 0.9);
+    // Structure belongs to absorbing dust, never to the smooth stellar light.
+    float structure = fbm(direction * vec3(38.0, 70.0, 38.0) + 17.0);
+    return envelope * (0.20 + 1.8 * smoothstep(0.32, 0.70, structure));
   }
 `;
 
 export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
   varying vec3 vDirection;
-  uniform float uEyeAdapted;
+  uniform vec3 uObserver;
   ${GALACTIC_DUST_GLSL}
+  ${RADIATIVE_TRANSFER_GLSL}
   void main() {
     vec3 ray = normalize(vDirection);
     vec3 colour = vec3(0.0), transmission = vec3(1.0);
-    float foreground = foregroundDust(ray);
-    float clouds = fbm(ray * 90.0 + fbm(ray * 12.0) * 8.0);
-    // Front-to-back integration of stellar light and wavelength-dependent
-    // extinction. Units: kpc, with Sol 8.2 kpc from the Galactic centre.
-    float previous = 0.0;
-    for (int i = 0; i < 40; i++) {
-      float t = (float(i) + 1.0) / 40.0;
-      float farDistance = 24.0 * t * t;
+    vec3 centre = vec3(${GALACTIC_CENTRE_KPC}, -0.02, 0.0);
+    vec3 offset = uObserver - centre;
+    float b = dot(offset, ray);
+    vec3 closest = offset - b * ray;
+    float discriminant = 400.0 - dot(closest, closest);
+    if (discriminant <= 0.0) { gl_FragColor = vec4(0,0,0,1); return; }
+    float entry = max(0.0, -b - sqrt(discriminant));
+    float exitDistance = -b + sqrt(discriminant);
+    if (exitDistance <= entry) { gl_FragColor = vec4(0,0,0,1); return; }
+    // Local extinction is a finite cloud complex around Sol, not a mask
+    // attached to the camera. Its internal shapes/distances are illustrative.
+    // Sample its angular structure once at each shell crossing, not at every
+    // integration step. The near and far faces can obscure different regions.
+    float solarMid = -dot(uObserver, ray);
+    vec3 solarClosest = uObserver + ray * solarMid;
+    float halfChord = sqrt(max(0.55*0.55-dot(solarClosest,solarClosest), 0.0));
+    vec3 nearPoint = uObserver + ray * (solarMid-halfChord);
+    vec3 farPoint = uObserver + ray * (solarMid+halfChord);
+    float nearDust = foregroundDust(length(nearPoint) > 0.001 ? normalize(nearPoint) : ray);
+    float farDust = foregroundDust(length(farPoint) > 0.001 ? normalize(farPoint) : ray);
+    float previous = entry;
+    for (int i = 0; i < 96; i++) {
+      float t = (float(i) + 1.0) / 96.0;
+      float farDistance = mix(entry, exitDistance, t*t);
       float stepSize = farDistance - previous;
       float distance = previous + stepSize * 0.5;
       previous = farDistance;
-      vec3 p = ray * distance;
-      vec2 disc = vec2(8.2 - p.x, p.z);
+      vec3 p = uObserver + ray * distance;
+      vec2 disc = vec2(centre.x - p.x, p.z);
       float radius = length(disc), height = p.y + 0.02;
       float angle = atan(disc.y, disc.x);
       float spiral = 0.5 + 0.5 * cos(4.0 * (angle - log(max(radius, 0.3) / 8.2) / tan(radians(12.0))));
-      float arms = pow(spiral, 3.0);
-      float radial = exp(-radius / 3.0);
-      float thinDisc = radial * exp(-abs(height) / 0.16);
-      float thickDisc = radial * exp(-abs(height) / 0.65);
+      float arms = pow(spiral, 4.0) * smoothstep(1.5, 3.5, radius);
+      float radial = exp(-radius / 2.6) * (1.0-smoothstep(14.0,19.0,radius));
+      float thinDisc = radial * exp(-abs(height) / 0.28);
+      float thickDisc = radial * exp(-abs(height) / 0.85);
       vec2 bar = mat2(0.891, -0.454, 0.454, 0.891) * disc;
-      float bulge = exp(-length(vec3(bar.x / 1.6, height / 0.55, bar.y / 0.65)));
-      float knots = noise3(p * 2.0 + 31.0);
-      vec3 emissivity = vec3(1.0, 0.82, 0.64) * (bulge * 1.5 + thickDisc * 0.17)
-                      + mix(vec3(0.75, 0.78, 0.88), vec3(0.48, 0.65, 1.0), arms)
-                        * thinDisc * (0.5 + arms * 1.5) * (0.5 + clouds + knots * 0.6);
-      float dust = exp(-radius / 4.5) * exp(-abs(height) / 0.085)
-                 * (0.6 + arms * 0.4) * (0.7 + knots * 0.6);
-      dust += foreground * exp(-pow((distance - 0.65) / 0.30, 2.0)) * 2.0;
-      vec3 tau = vec3(0.85, 1.0, 1.22) * dust * stepSize * 1.5;
+      float bulge = exp(-length(vec3(bar.x / 1.75, height / 0.62, bar.y / 0.75)));
+      // Old stars form a smooth, broad bulge; young arms make a modest excess.
+      vec3 emissivity = vec3(1.0, 0.85, 0.68) * (bulge * 2.4 + thickDisc * 0.13)
+                      + vec3(0.83, 0.87, 1.0) * thinDisc * (0.75 + arms * 0.65);
+      float knots = noise3(p * vec3(2.3,11.0,2.3) + 31.0);
+      float dust = exp(-radius / 4.5) * exp(-abs(height) / 0.065)
+                 * (0.55 + arms * 0.65) * (0.35 + knots * 1.5);
+      float solarDistance = length(p);
+      if (solarDistance > 0.1 && solarDistance < 1.4) {
+        dust += mix(nearDust, farDust, smoothstep(solarMid-0.05,solarMid+0.05,distance))
+              * exp(-pow((solarDistance-0.55)/0.22,2.0)) * 1.8;
+      }
+      vec3 tau = vec3(0.76, 1.0, 1.38) * dust * stepSize * 1.8;
       vec3 attenuation = exp(-tau);
-      colour += transmission * emissivity * stepSize * (1.0 - attenuation) / max(tau, vec3(0.00001));
+      colour += transmission * emissivity * stepSize * emissionIntegral(tau);
       transmission *= attenuation;
     }
-    vec2 lb = degrees(vec2(atan(ray.z, ray.x), asin(clamp(ray.y,-1.0,1.0))));
-    float emission = cloud(lb, vec2(6,-1), vec2(2,1))
-                   + cloud(lb, vec2(80,1), vec2(3,2))
-                   + cloud(lb, vec2(-73,-1), vec2(3,2));
-    colour += vec3(0.10,0.008,0.025) * emission * pow(clouds, 2.0) * exp(-foreground);
-    colour *= 0.7 + noise3(ray * 1600.0) * 0.6;
-    float luminance = dot(colour, vec3(0.2126, 0.7152, 0.0722));
-    colour = mix(colour, vec3(luminance), uEyeAdapted * 0.86);
-    gl_FragColor = vec4(colour * mix(0.28, 0.085, uEyeAdapted), 1.0);
-    #include <tonemapping_fragment>
-    #include <colorspace_fragment>
+    // Linear HDR radiance: observation response and tone mapping happen once,
+    // at presentation, rather than baking exposure into the integration.
+    gl_FragColor = vec4(colour, 1.0);
   }
 `;
