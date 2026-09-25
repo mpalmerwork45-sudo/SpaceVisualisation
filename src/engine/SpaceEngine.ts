@@ -126,7 +126,7 @@ export class SpaceEngine {
     this.scene.add(this.milkyWay.mesh);
 
     // 6. Sub-Pixel 65,000 3D Vector Pinpoint Starfield
-    this.starField = new StarFieldBackground(65000);
+    this.starField = new StarFieldBackground();
     this.scene.add(this.starField.points);
 
     // 7. Sub-renderers
@@ -241,6 +241,7 @@ export class SpaceEngine {
     this.renderer.toneMappingExposure = exposure;
     this.deepSpaceRenderer.setExposure(mode === 'enhancedOptical' ? 1.45 : 0.72);
     this.milkyWay.setObservationMode(mode);
+    this.starField.setObservationMode(mode);
   }
 
   public async setMilkyWayMode(mode: MilkyWayMode) {

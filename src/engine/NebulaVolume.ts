@@ -48,9 +48,10 @@ const fragmentShader = /* glsl */ `
       if (uKind == 1 || uKind == 2) {
         // Planetary nebula: an ionised, hollow shell with an equatorial torus.
         float ringRadius = length(p.xy);
-        float shell = exp(-pow((length(p*vec3(1,1,1.7))-0.58)/0.11,2.0));
-        float torus = exp(-pow((ringRadius-0.57)/0.09,2.0)-pow(p.z/0.20,2.0));
-        density = (shell*0.5+torus*1.5)*(0.65+turbulence*0.6+fine*0.2);
+        float rim = 0.57 + 0.018*sin(atan(p.y,p.x)*9.0) + (fine-0.5)*0.018;
+        float shell = exp(-pow((length(p*vec3(1,1,1.7))-rim)/0.075,2.0));
+        float torus = exp(-pow((ringRadius-rim)/0.055,2.0)-pow(p.z/0.20,2.0));
+        density = (shell*0.5+torus*1.8)*(0.30+smoothstep(0.30,0.65,turbulence)*1.5+fine*0.3);
         colour = mix(vec3(0.14,0.47,0.51),vec3(0.65,0.16,0.13),smoothstep(0.48,0.64,ringRadius));
         density += exp(-r*r*3800.0)*2.0;
         if (uKind == 2) density += exp(-pow((r-0.80)/0.045,2.0))*0.09;
@@ -93,6 +94,11 @@ const fragmentShader = /* glsl */ `
       float attenuation = exp(-tau);
       light += transmission*colour*density*stepSize*2.0*emissionIntegral(tau);
       transmission *= attenuation;
+    }
+    if (uKind == 1 || uKind == 2) {
+      // Analytic line-of-sight profile: a compact central illuminator is too
+      // small for the gas integration steps to resolve consistently.
+      light += vec3(0.25,0.34,0.50)*exp(-dot(closest,closest)/0.00002)*transmission;
     }
     float alpha = clamp(1.0-transmission,0.0,1.0);
     if (alpha < 0.002) discard;

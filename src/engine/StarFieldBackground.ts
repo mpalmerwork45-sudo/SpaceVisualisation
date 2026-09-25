@@ -5,6 +5,7 @@ import { GALACTIC_DUST_GLSL } from './GalacticSkyModel';
 
 const STAR_VERTEX_SHADER = /* glsl */ `
   attribute float size;
+  uniform float uEyeAdapted;
   varying vec3 vColor;
   #include <common>
   #include <logdepthbuf_pars_vertex>
@@ -12,6 +13,8 @@ const STAR_VERTEX_SHADER = /* glsl */ `
 
   void main() {
     vColor = color * exp(-vec3(0.72, 1.0, 1.42) * foregroundDust(normalize(position)));
+    float luminance = dot(vColor,vec3(0.2126,0.7152,0.0722));
+    vColor = mix(vColor,vec3(luminance),uEyeAdapted*0.8) * mix(1.0,0.32,uEyeAdapted);
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mvPosition;
     #include <logdepthbuf_vertex>
@@ -48,7 +51,7 @@ const STAR_FRAGMENT_SHADER = /* glsl */ `
 export class StarFieldBackground {
   public points: THREE.Points;
 
-  constructor(count: number = 65000) {
+  constructor(count: number = 100000) {
     console.log(`🌌 [StarFieldBackground] Generating ${count.toLocaleString()} deterministic unresolved stars...`);
 
     const geometry = new THREE.BufferGeometry();
@@ -75,10 +78,12 @@ export class StarFieldBackground {
     const thinDiskSigma = 7.5 * Math.PI / 180;
 
     for (let i = 0; i < count; i++) {
-      const longitude = random() * Math.PI * 2;
-      // Most unresolved stars are concentrated around the Galactic plane;
-      // the isotropic component represents the thick disk/halo population.
-      const latitude = random() < 0.78
+      // A separate old-star bulge is essential: a longitude-uniform band reads
+      // as mist even when the diffuse density model has a central bulge.
+      const population = random();
+      const longitude = population < 0.4 ? gaussian() * THREE.MathUtils.degToRad(15)
+        : random() * Math.PI * 2;
+      const latitude = population < 0.8
         ? THREE.MathUtils.clamp(gaussian() * thinDiskSigma, -Math.PI / 2, Math.PI / 2)
         : Math.asin(2 * random() - 1);
       const cosLatitude = Math.cos(latitude);
@@ -98,13 +103,13 @@ export class StarFieldBackground {
             : colourSample < 0.86 ? 3
               : colourSample < 0.97 ? 4 : 5;
       const colour = palette[colourIndex].clone();
-      const brightness = 0.12 + Math.pow(random(), 3.6) * 0.88;
+      const brightness = 0.025 + Math.pow(random(), 4.5) * 0.75;
       colour.multiplyScalar(brightness);
       colors[i * 3] = colour.r;
       colors[i * 3 + 1] = colour.g;
       colors[i * 3 + 2] = colour.b;
 
-      sizes[i] = 0.42 + Math.pow(random(), 4.2) * 2.2;
+      sizes[i] = 0.35 + Math.pow(random(), 4.2) * 1.7;
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -114,6 +119,7 @@ export class StarFieldBackground {
     const material = new THREE.ShaderMaterial({
       vertexShader: STAR_VERTEX_SHADER,
       fragmentShader: STAR_FRAGMENT_SHADER,
+      uniforms: { uEyeAdapted: { value: 1 } },
       vertexColors: true,
       transparent: true,
       depthWrite: false,
@@ -128,6 +134,10 @@ export class StarFieldBackground {
 
   public setPlaneAlignment(alignment: PlaneAlignment) {
     this.points.quaternion.copy(galacticFrameQuaternion(alignment));
+  }
+
+  public setObservationMode(mode: 'darkAdaptedEye' | 'enhancedOptical') {
+    (this.points.material as THREE.ShaderMaterial).uniforms.uEyeAdapted.value = mode === 'darkAdaptedEye' ? 1 : 0;
   }
 
   public dispose() {

@@ -4,6 +4,23 @@ import { DeepSpaceRenderer } from './DeepSpaceRenderer';
 import { angularDiameterToWorldSize } from '../utils/coordinates';
 
 describe('deep-space volumes', () => {
+  it('renders galaxies once, with a disc axis ratio independent of the bulge footprint', () => {
+    const renderer = new DeepSpaceRenderer();
+    renderer.setExposure(1.45);
+    renderer.updateDeepSpace('realistic','galactic');
+    const node = renderer.objectsMap.get('andromeda_m31')!;
+    const meshes: THREE.Mesh[] = [];
+    node.mesh.traverse(object => { if (object instanceof THREE.Mesh) meshes.push(object); });
+    expect(meshes).toHaveLength(1);
+    const mesh = meshes[0], material = mesh.material as THREE.ShaderMaterial;
+    const appearance = node.data.galaxy!;
+    expect(mesh.scale.x).toBeCloseTo(angularDiameterToWorldSize(appearance.majorArcmin,1200),8);
+    expect(mesh.scale.y).toBe(mesh.scale.x);
+    expect(material.uniforms.uAxisRatio.value).toBeCloseTo(
+      angularDiameterToWorldSize(appearance.minorArcmin,1200) / mesh.scale.x,8);
+    expect(material.uniforms.uExposure.value).toBe(1.45);
+    renderer.dispose();
+  });
   it('preserves angular extents and exposure when the coordinate frame changes', () => {
     const renderer = new DeepSpaceRenderer();
     renderer.setExposure(1.2);

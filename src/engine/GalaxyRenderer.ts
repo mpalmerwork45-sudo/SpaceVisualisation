@@ -15,7 +15,6 @@ export interface RenderedGalaxyNode {
   data: DeepSpaceObjectData;
   position: THREE.Vector3;
   mesh: THREE.Object3D;
-  closeMesh?: THREE.Object3D;
 }
 
 const GALAXY_VERTEX_SHADER = /* glsl */ `
@@ -41,9 +40,9 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
   uniform float uArmContrast;
   uniform float uDustOpacity;
   uniform float uInclination;
+  uniform float uAxisRatio;
   uniform float uPhotometricFlux;
   uniform float uExposure;
-  uniform float uOpacity;
   uniform float uSeed;
   uniform int uMorphology;
 
@@ -87,9 +86,12 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
   }
 
   void main() {
-    vec2 p = vUv * 2.0 - 1.0;
+    vec2 sky = vUv * 2.0 - 1.0;
+    // Deproject only the disc. A spheroidal bulge must not be flattened to
+    // the same thin ellipse as an inclined stellar disc.
+    vec2 p = vec2(sky.x, sky.y / uAxisRatio);
     float radius = length(p);
-    if (radius > 1.0) discard;
+    if (length(sky) > 1.0) discard;
     #include <logdepthbuf_fragment>
     float cloud = fractal(p*19.0+uSeed);
     float fine = valueNoise(p*240.0+uSeed);
@@ -98,9 +100,11 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
     // Ciotti-Bertin approximation to the Sersic b_n coefficient.
     float bn = 2.0 * n - 1.0 / 3.0 + 4.0 / (405.0 * n) + 46.0 / (25515.0 * n * n);
     float bulgeRe = mix(0.10, 0.30, clamp(uBulgeFraction, 0.0, 1.0));
-    float bulgeRadius = max(radius / bulgeRe, 0.002);
+    float bulgeRadius = max(length(sky * vec2(1.0,1.2)) / bulgeRe, 0.002);
     float bulge = exp(-bn * (pow(bulgeRadius, 1.0 / n) - 1.0));
+    bulge *= 1.0 - smoothstep(0.72,1.0,length(sky));
     float disk = exp(-radius / max(uDiskScale, 0.08));
+    disk *= 1.0 - smoothstep(0.84,1.0,radius);
 
     float arms = 0.0;
     if (uMorphology == 0 || uMorphology == 1) {
@@ -140,19 +144,25 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
     float opticalDepth = uDustOpacity * (projectedLane * (0.65 + 0.35 * disk) + faceOnDust) * (0.7+cloud*1.8);
     float dust = exp(-opticalDepth);
 
-    float intensity = max(0.0, (bulge * uBulgeFraction + disk * (1.0 - uBulgeFraction) * structure) * dust);
-    intensity *= 1.0 - smoothstep(0.84, 1.0, radius);
+    float bulgeLight = bulge * uBulgeFraction;
+    float diskLight = disk * (1.0-uBulgeFraction) * structure;
+    float intensity = max(0.0, (bulgeLight + diskLight) * dust);
     if (intensity < 0.001) discard;
 
     float young = clamp(arms * 0.72 + (1.0 - uBulgeFraction) * 0.12, 0.0, 1.0);
+    young *= diskLight / max(bulgeLight + diskLight,0.0001);
     vec3 color = mix(uPrimary, uSecondary, young);
     color *= exp(-vec3(0.10,0.20,0.36)*opticalDepth);
     float clusters = smoothstep(0.72,0.90,fine)*arms*disk;
     color += vec3(0.18,0.035,0.065)*clusters;
+    float luminance = dot(color, vec3(0.2126,0.7152,0.0722));
+    color = mix(vec3(luminance), color, mix(0.06,1.0,smoothstep(0.72,1.45,uExposure)));
     float radiance = intensity * uPhotometricFlux * uExposure;
-    float alpha = clamp(intensity * uOpacity, 0.0, 1.0);
+    float alpha = 1.0 - exp(-intensity);
 
-    gl_FragColor = vec4(color * radiance, alpha);
+    // radiance is already integrated surface light. Divide out coverage before
+    // the standard premultiply, otherwise faint outskirts are dimmed twice.
+    gl_FragColor = vec4(color * radiance / max(alpha,0.00001), alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
     // Premultiply after tone mapping/output conversion, matching Three's
@@ -248,39 +258,22 @@ export class GalaxyRenderer {
 
     const geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
     const material = this.createMaterial(dso, appearance);
+    material.uniforms.uAxisRatio.value = minorSize / majorSize;
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(position);
-    mesh.scale.set(majorSize, minorSize, 1);
+    mesh.scale.set(majorSize, majorSize, 1);
     mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(major, minor, direction));
     mesh.userData = { deepObjectData: dso, type: 'deepSpace' };
 
-    const closeMesh = this.createCloseLayer(dso, appearance, majorSize, minorSize, major, minor, direction, position);
-    closeMesh.visible = false;
-    closeMesh.userData = { deepObjectData: dso, type: 'deepSpace', closeLod: true };
-
     const group = new THREE.Group();
     group.position.set(0, 0, 0);
-    group.add(mesh, closeMesh);
+    group.add(mesh);
     group.userData = { deepObjectData: dso, type: 'deepSpace' };
     this.group.add(group);
 
-    const node: RenderedGalaxyNode = { data: dso, position: position.clone(), mesh: group, closeMesh };
+    const node: RenderedGalaxyNode = { data: dso, position: position.clone(), mesh: group };
     this.nodes.set(dso.id, node);
     return node;
-  }
-
-  public updateCloseLod(camera: THREE.PerspectiveCamera, viewMode: ViewMode) {
-    this.nodes.forEach(node => {
-      if (!node.closeMesh || !node.data.galaxy || viewMode !== 'linear') return;
-      const physicalSize = node.data.galaxy.physicalDiameterLy;
-      const distance = camera.position.distanceTo(node.position);
-      const t = THREE.MathUtils.smoothstep(distance, physicalSize * 1.2, physicalSize * 3.0);
-      node.closeMesh.visible = t < 0.99;
-      const mesh = node.closeMesh as THREE.Mesh;
-      if (mesh.material instanceof THREE.ShaderMaterial && mesh.material.uniforms.uOpacity) {
-        mesh.material.uniforms.uOpacity.value = 0.18 * (1 - t);
-      }
-    });
   }
 
   private createMaterial(dso: DeepSpaceObjectData, appearance: GalaxyAppearance): THREE.ShaderMaterial {
@@ -315,9 +308,9 @@ export class GalaxyRenderer {
         uArmContrast: { value: appearance.armContrast || 0 },
         uDustOpacity: { value: appearance.dustOpacity },
         uInclination: { value: appearance.inclinationDeg },
+        uAxisRatio: { value: appearance.minorArcmin / appearance.majorArcmin },
         uPhotometricFlux: { value: photometricFlux },
         uExposure: { value: this.exposure },
-        uOpacity: { value: 0.92 },
         uSeed: { value: stableSeed(dso.id) * 31.0 },
         uMorphology: { value: morphologyId(appearance.morphology) }
       },
@@ -329,29 +322,6 @@ export class GalaxyRenderer {
       blending: THREE.NormalBlending,
       toneMapped: true
     });
-  }
-
-  private createCloseLayer(
-    dso: DeepSpaceObjectData,
-    appearance: GalaxyAppearance,
-    width: number,
-    height: number,
-    major: THREE.Vector3,
-    minor: THREE.Vector3,
-    direction: THREE.Vector3,
-    position: THREE.Vector3
-  ): THREE.Mesh {
-    const geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
-    const material = this.createMaterial(dso, {
-      ...appearance,
-      dustOpacity: Math.min(1, appearance.dustOpacity + 0.15),
-      armContrast: (appearance.armContrast || 0) * 0.65
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.copy(position);
-    mesh.scale.set(width * 1.015, height * 1.015, 1);
-    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(major, minor, direction));
-    return mesh;
   }
 
   private createFeatureMarker(dso: DeepSpaceObjectData, position: THREE.Vector3): THREE.Mesh {

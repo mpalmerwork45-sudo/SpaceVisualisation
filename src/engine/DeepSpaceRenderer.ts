@@ -75,7 +75,6 @@ export class DeepSpaceRenderer {
 
   public animate(_timeSec: number, camera?: THREE.PerspectiveCamera, viewMode: ViewMode = 'linear') {
     if (camera) {
-      this.galaxyRenderer.updateCloseLod(camera, viewMode);
       this.objectsMap.forEach(node => {
         if (node.mesh instanceof THREE.Mesh && node.mesh.material instanceof THREE.ShaderMaterial) {
           node.mesh.updateWorldMatrix(true,false);

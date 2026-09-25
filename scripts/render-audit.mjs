@@ -130,8 +130,44 @@ try {
   }
   await evaluate(`auditEngine.setObservationMode('enhancedOptical'); auditPose([1,0,0])`);
   await screenshot('centre-enhanced');
+  await evaluate(`auditEngine.starField.points.visible = true; auditDraw()`);
+  await screenshot('centre-stars-enhanced');
+  await evaluate(`auditEngine.setObservationMode('darkAdaptedEye'); auditDraw()`);
+  await screenshot('centre-stars-eye');
+  await evaluate(`auditEngine.starField.points.visible = false; auditEngine.setObservationMode('enhancedOptical')`);
   await evaluate(`(async()=>{await auditEngine.setMilkyWayMode('photo'); auditDraw()})()`);
   await screenshot('centre-photo');
+  if (!process.argv.includes('--baseline')) {
+    await evaluate(`(async()=>{
+      await auditEngine.setMilkyWayMode('render');
+      auditEngine.starField.points.visible = false;
+      const c = auditEngine.camera;
+      c.position.set(26700,80000,0); c.up.set(0,0,1); c.lookAt(26700,0,0);
+      c.fov = 70; c.updateProjectionMatrix(); auditDraw();
+    })()`);
+    await screenshot('external-galaxy');
+    results.outwardPixel = await evaluate(`{
+      const e = auditEngine, c = e.camera;
+      c.lookAt(26700,160000,0); auditDraw();
+      const gl=e.renderer.getContext(), pixel=new Uint8Array(4);
+      gl.readPixels(640,400,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixel);
+      [...pixel];
+    }`);
+    await evaluate(`{
+      const e = auditEngine;
+      e.viewMode = 'realistic';
+      e.deepSpaceRenderer.updateDeepSpace('realistic','galactic');
+      e.deepSpaceRenderer.group.visible = true;
+    }`);
+    for (const object of ['andromeda_m31', 'm42_orion_nebula', 'm57_ring_nebula', 'm1_crab_nebula']) {
+      await evaluate(`{
+        const node = auditEngine.deepSpaceRenderer.objectsMap.get('${object}');
+        if (!node) throw new Error('Missing audit object: ${object}');
+        auditPose(node.position.toArray(), node.data.angularSizeArcmin / 60 * 1.8);
+      }`);
+      await screenshot(object);
+    }
+  }
   results.errors = errors;
   await writeFile(`${output}/report.json`, JSON.stringify(results, null, 2));
   console.log(JSON.stringify(results, null, 2));

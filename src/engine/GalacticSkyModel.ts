@@ -55,7 +55,7 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
   void main() {
     vec3 ray = normalize(vDirection);
     vec3 colour = vec3(0.0), transmission = vec3(1.0);
-    vec3 centre = vec3(${GALACTIC_CENTRE_KPC}, -0.02, 0.0);
+    vec3 centre = vec3(${GALACTIC_CENTRE_KPC}, 0.0, 0.0);
     vec3 offset = uObserver - centre;
     float b = dot(offset, ray);
     vec3 closest = offset - b * ray;
@@ -75,16 +75,30 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
     vec3 farPoint = uObserver + ray * (solarMid+halfChord);
     float nearDust = foregroundDust(length(nearPoint) > 0.001 ? normalize(nearPoint) : ray);
     float farDust = foregroundDust(length(farPoint) > 0.001 ? normalize(farPoint) : ray);
+    // From above/below the disc, uniform long-path steps can jump over its
+    // thin dust layer, drawing false concentric rings. Spend 64 of 96 samples
+    // within +/-1.5 kpc of the midplane and 16 on each outer segment.
+    bool samplePlane = abs(offset.y) > 1.5 && abs(ray.y) > 0.12;
+    float planeA = (-1.5-offset.y) / (abs(ray.y) > 0.0001 ? ray.y : 0.0001);
+    float planeB = ( 1.5-offset.y) / (abs(ray.y) > 0.0001 ? ray.y : 0.0001);
+    float planeEntry = clamp(min(planeA,planeB),entry,exitDistance);
+    float planeExit = clamp(max(planeA,planeB),entry,exitDistance);
     float previous = entry;
     for (int i = 0; i < 96; i++) {
       float t = (float(i) + 1.0) / 96.0;
       float farDistance = mix(entry, exitDistance, t*t);
+      if (samplePlane) {
+        float index = float(i)+1.0;
+        farDistance = index <= 16.0 ? mix(entry,planeEntry,index/16.0)
+          : index <= 80.0 ? mix(planeEntry,planeExit,(index-16.0)/64.0)
+          : mix(planeExit,exitDistance,(index-80.0)/16.0);
+      }
       float stepSize = farDistance - previous;
       float distance = previous + stepSize * 0.5;
       previous = farDistance;
       vec3 p = uObserver + ray * distance;
       vec2 disc = vec2(centre.x - p.x, p.z);
-      float radius = length(disc), height = p.y + 0.02;
+      float radius = length(disc), height = p.y;
       float angle = atan(disc.y, disc.x);
       float spiral = 0.5 + 0.5 * cos(4.0 * (angle - log(max(radius, 0.3) / 8.2) / tan(radians(12.0))));
       float arms = pow(spiral, 4.0) * smoothstep(1.5, 3.5, radius);
@@ -92,7 +106,10 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
       float thinDisc = radial * exp(-abs(height) / 0.28);
       float thickDisc = radial * exp(-abs(height) / 0.85);
       vec2 bar = mat2(0.891, -0.454, 0.454, 0.891) * disc;
-      float bulge = exp(-length(vec3(bar.x / 1.75, height / 0.62, bar.y / 0.75)));
+      float bulgeRadius = length(vec3(bar.x / 1.75, height / 0.62, bar.y / 0.75));
+      // Taper the outer bar: a long exponential tail washes the whole sky in
+      // warm light and overwhelms the stellar disc in an external view.
+      float bulge = exp(-pow(bulgeRadius,1.5));
       // Old stars form a smooth, broad bulge; young arms make a modest excess.
       vec3 emissivity = vec3(1.0, 0.85, 0.68) * (bulge * 2.4 + thickDisc * 0.13)
                       + vec3(0.83, 0.87, 1.0) * thinDisc * (0.75 + arms * 0.65);
