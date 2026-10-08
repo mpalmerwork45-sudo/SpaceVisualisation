@@ -205,7 +205,7 @@ export const CONSTELLATIONS: ConstellationData[] = [
     id: 'bootes',
     name: 'Boötes (The Herdsman)',
     lines: [
-      ['arcturus', 'denebola']
+      ['arcturus', 'izar']
     ]
   },
   {

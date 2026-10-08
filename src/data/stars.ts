@@ -7,8 +7,9 @@ export interface StarData {
   spectral: string;  // Spectral classification (e.g., G2V, M5.5Ve, L7.5, Y2)
   mag: number;       // Apparent magnitude
   absMag: number;    // Absolute magnitude
-  lum: number;       // Luminosity relative to Sol (L_sun)
-  temp: number;      // Surface temperature in Kelvin
+  lum?: number;     // Luminosity relative to Sol (L_sun), if documented
+  temp?: number;    // Surface temperature in Kelvin, if documented
+  source?: string;  // Source for astrometry, spectral type and V magnitude
   mass?: number;     // Solar masses
   radius?: number;   // Solar radii
   metallicity?: number; // Metallicity [Fe/H] in dex (e.g. +0.05, -0.24)
@@ -28,6 +29,46 @@ export interface StarData {
 }
 
 export const STARS_CATALOG: StarData[] = [
+  // Missing constellation anchors. J2000 positions, V magnitudes and parallaxes
+  // are from CDS/SIMBAD; distance = 1000/parallax(mas) parsecs. Absolute V
+  // magnitude is derived without an extinction correction. Omit unsupported
+  // temperatures/luminosities rather than inventing them for the info panel.
+  {
+    id: 'castor_a', name: 'Castor (Alpha Geminorum system)',
+    ra: 7 + 34/60 + 35.87319/3600, dec: 31 + 53/60 + 17.816/3600,
+    dist: 3261.563777/64.12, spectral: 'A1V+A2Vm', mag: 1.58,
+    absMag: 1.58 + 5*Math.log10(64.12/100), constellation: 'Gemini',
+    isProminent: true, isConstellationNode: true,
+    source: 'https://simbad.cds.unistra.fr/simbad/sim-basic?Ident=Castor',
+    description: 'A multiple-star system represented as an unresolved catalogue point. The displayed visual magnitude belongs to the combined system, not one component.'
+  },
+  {
+    id: 'pollux', name: 'Pollux (Beta Geminorum)',
+    ra: 7 + 45/60 + 18.94987/3600, dec: 28 + 1/60 + 34.316/3600,
+    dist: 3261.563777/96.54, spectral: 'K0IIIb', mag: 1.14,
+    absMag: 1.14 + 5*Math.log10(96.54/100), constellation: 'Gemini',
+    isProminent: true, isConstellationNode: true,
+    source: 'https://simbad.cds.unistra.fr/simbad/sim-id?Ident=Pollux',
+    description: 'An orange giant marking one of the Gemini twins. Its warm colour contrasts with the white Castor system.'
+  },
+  {
+    id: 'arcturus', name: 'Arcturus (Alpha Boötis)',
+    ra: 14 + 15/60 + 39.67207/3600, dec: 19 + 10/60 + 56.673/3600,
+    dist: 3261.563777/88.83, spectral: 'K1.5IIIFe-0.5', mag: -0.05,
+    absMag: -0.05 + 5*Math.log10(88.83/100), constellation: 'Boötes',
+    isProminent: true, isConstellationNode: true,
+    source: 'https://simbad.cds.unistra.fr/simbad/sim-basic?Ident=alf+boo',
+    description: 'A nearby orange red-giant-branch star and the bright anchor of Boötes.'
+  },
+  {
+    id: 'izar', name: 'Izar (Epsilon Boötis)',
+    ra: 14 + 44/60 + 59.217558/3600, dec: 27 + 4/60 + 27.200351/3600,
+    dist: 3261.563777/13.8267, spectral: 'K0-II-III', mag: 2.45,
+    absMag: 2.45 + 5*Math.log10(13.8267/100), constellation: 'Boötes',
+    isConstellationNode: true,
+    source: 'https://simbad.u-strasbg.fr/simbad/sim-id?Ident=eps+Boo',
+    description: 'The bright orange component of the Izar double-star system, a constellation anchor northeast of Arcturus.'
+  },
   // --- SOL SYSTEM CENTER ---
   {
     id: 'sol',
