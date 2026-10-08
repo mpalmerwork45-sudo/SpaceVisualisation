@@ -232,9 +232,13 @@ export class UIManager {
     this.searchResultsElem = document.getElementById('search-results')!;
     // Keep the sky usable on smaller screens; every control remains accessible
     // in keyboard-operable disclosures with independently scrollable contents.
-    const wide = window.matchMedia('(min-width: 1600px)').matches;
-    (document.getElementById('navigation-options') as HTMLDetailsElement).open = wide;
-    (document.getElementById('orientation-options') as HTMLDetailsElement).open = wide;
+    const wideScreen = window.matchMedia('(min-width: 1600px)');
+    const adaptControls = () => {
+      (document.getElementById('navigation-options') as HTMLDetailsElement).open = wideScreen.matches;
+      (document.getElementById('orientation-options') as HTMLDetailsElement).open = wideScreen.matches;
+    };
+    adaptControls();
+    wideScreen.addEventListener('change', adaptControls);
 
     this.bindUIEvents();
   }

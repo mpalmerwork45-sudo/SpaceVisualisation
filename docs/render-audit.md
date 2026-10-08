@@ -1,5 +1,33 @@
 # Procedural rendering audit — 25 September 2026
 
+## Interaction audit follow-up — 8 October 2026
+
+The ten interaction/data/resource findings were repaired and exercised with unit
+tests and `scripts/audit-regression.mjs` against Chrome/SwiftShader. The checks
+cover coordinate-frame consistency; action-time selection coordinates; realistic
+stellar visibility; persistent filters and catalogue-wide search; selectable-only
+picking; responsive controls and bounded scrolling detail panels; WebGL recovery;
+engine-driven UI state and keyboard/pointer/touch input; constellation references;
+and Solar System resource disposal. The new constellation astrometry and V
+magnitudes are linked to CDS/SIMBAD directly in the catalogue and object panels.
+
+The headless browser deliberately lost and restored its WebGL context: the
+sampled sky pixel returned exactly to `[141, 90, 45, 255]`. Five Solar System
+rebuilds left the allocated geometry count unchanged at 25 after warming the
+tested camera view (resources are allocated lazily for visible objects).
+The alignment residual for Earth's position was below `1e-9 AU`, and modal
+re-centring after changing mode/frame had zero position error. Layouts were
+checked at 320, 390, 768, 1280 and 1920 pixels. These are interaction correctness
+checks, not claims about mobile GPU performance or improved scientific fidelity.
+
+Final validation passed 54 unit tests and 85 browser assertions, along with the
+TypeScript check and production build. The existing large-bundle build warning
+and three development-dependency audit advisories were outside these ten fixes.
+
+The earlier rendering limitations below still apply.
+
+## Original rendering comparison
+
 The implementation was compared in the browser against the previous shader
 (`0dc4605`) and the bundled ESO/S. Brunier panorama. The photo is a structural
 reference, not a target for naked-eye brightness or absolute colour calibration.

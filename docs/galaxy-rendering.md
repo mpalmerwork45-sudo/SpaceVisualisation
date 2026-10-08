@@ -105,6 +105,22 @@ This is a display approximation to dark adaptation, not a calibrated simulation
 of human vision. A bright foreground planet or Sun does not yet dynamically
 change adaptation. Photo mode is dimmed but retains its photographed colour.
 
+Catalogue stars in the angular sky omit Sol (the observer), rather than placing
+it at its placeholder catalogue coordinates. Eye exposure has an illustrative
+V-magnitude limit of 6.5; enhanced exposure extends it to 14. Relative stellar
+light follows the magnitude/flux relation with bright-end display compression,
+and eye colour is muted. Invisible stars have no pickable geometry or labels.
+The physical/logarithmic maps retain all catalogue navigation markers; searching
+for a faint star still opens its information and explains the visibility limit.
+These conventions are not physiological or telescope calibrations.
+
+Changing coordinate alignment transforms the current and target camera anchors,
+orbit directions, up vector and all planetary/orbital geometry together, preserving
+physical position, heading and zoom. Selection actions resolve catalogue IDs in
+the current mode and frame, so an open information panel never centres on stale
+coordinates. Spectral filters persist through rebuilds; explicit search reveals
+a filtered-out star by clearing the incompatible filter. Brown dwarfs group L/T/Y.
+
 Startup and the Sol Planetary Zoom preset centre on Sol at 0.0003 ly (~19 AU),
 looking directly toward the Galactic centre (l=0°, b=0°). The scene remains
 ecliptic-aligned for planetary orbits; the camera direction is transformed into
@@ -164,6 +180,24 @@ schema/uniqueness, physical galaxy diameter checks, orbit-camera direction,
 background-frame alignment, extended-source surface photometry, transparent
 and opaque radiative-transfer limits, subdivision invariance, observer/frame
 conversion, HDR-cache invalidation, render-state restoration and disposal.
+
+The interaction regression suite uses Playwright and a Vite dev server:
+
+```sh
+npm run dev -- --host 127.0.0.1 --port 5179
+# In a second terminal, with Playwright Chromium installed:
+npm run test:browser
+# Or use an existing Chrome installation:
+CHROME_PATH=/usr/bin/google-chrome npm run test:browser
+```
+
+Set `AUDIT_URL` for a different server and `AUDIT_OUTPUT` for a different output
+directory (default `/tmp/space-visualisation-regression`). The suite checks
+coordinate/selection/filter consistency, magnitude visibility, selective picking,
+planet controls, keyboard/pointer/touch interactions, GPU resource stability,
+actual WebGL context recovery, and layouts from 320 to 1920 pixels wide. It writes
+screenshots and a JSON report. It needs a dev server because it instruments the
+real engine without adding a production debug global.
 
 For repeatable visual/performance checks, run Vite and a local Chrome instance
 with remote debugging on port 9222, then:

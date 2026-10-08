@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "test:browser": "node scripts/audit-regression.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "lucide": "^0.475.0",
@@ -16,6 +18,7 @@
   },
   "devDependencies": {
     "@types/three": "^0.185.1",
+    "playwright": "^1.64.0",
     "typescript": "^7.0.2",
     "vite": "^6.1.0",
     "vitest": "^4.1.11"

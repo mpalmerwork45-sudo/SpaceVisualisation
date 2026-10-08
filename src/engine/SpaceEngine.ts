@@ -607,7 +607,7 @@ export class SpaceEngine {
     const angularTolerance = 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov/2)) * 4 / (this.renderer.domElement.clientHeight || 1000);
     objects.forEach(object => {
       if (!(object instanceof THREE.LineSegments)) return;
-      object.geometry.computeBoundingSphere();
+      if (!object.geometry.boundingSphere) object.geometry.computeBoundingSphere();
       const centre = object.localToWorld(object.geometry.boundingSphere!.center.clone());
       this.raycaster.params.Line!.threshold = Math.max(this.camera.near, this.camera.position.distanceTo(centre)) * angularTolerance;
       this.raycaster.intersectObject(object, false, hits);
