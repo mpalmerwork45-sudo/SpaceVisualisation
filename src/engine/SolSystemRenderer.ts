@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createPlanetMaterial, createSaturnRings } from './PlanetMaterials';
+import { frameRotation, CelestialAlignment } from '../utils/coordinates';
 import {
   PLANET_EPHEMERIS,
   KeplerianElements,
@@ -19,6 +20,7 @@ export class SolSystemRenderer {
   public planetsMap: Map<string, RenderedPlanet> = new Map();
   private orbitLinesGroup: THREE.Group;
   private isOrbitsVisible: boolean = false; // Default OFF as requested
+  private alignment: CelestialAlignment = 'ecliptic';
 
   constructor() {
     this.group = new THREE.Group();
@@ -36,20 +38,37 @@ export class SolSystemRenderer {
     this.orbitLinesGroup.visible = visible;
   }
 
+  public get orbitsVisible() { return this.isOrbitsVisible; }
+
+  public setPlaneAlignment(alignment: CelestialAlignment) {
+    this.alignment = alignment;
+    this.group.quaternion.copy(frameRotation('ecliptic', alignment));
+    this.planetsMap.forEach(({ mesh }) => {
+      (mesh.material as THREE.ShaderMaterial).uniforms.uSun.value
+        .copy(mesh.position).negate().normalize().applyQuaternion(this.group.quaternion);
+    });
+  }
+
+  private clearBodies() {
+    // Includes Saturn's child rings, and the orbits retained in a separate group.
+    this.group.traverse(object => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Line) {
+        object.geometry.dispose();
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach(material => material.dispose());
+      }
+    });
+    this.group.children.filter(child => child !== this.orbitLinesGroup).forEach(child => this.group.remove(child));
+    this.orbitLinesGroup.clear();
+    this.planetsMap.clear();
+  }
+
+  public dispose() { this.clearBodies(); }
+
   public createSolSystem(currentDate: Date = new Date()) {
     console.log(`🪐 [SolSystemRenderer] Computing real-time planet positions for date: ${currentDate.toISOString()}`);
 
-    // Clear existing
-    while (this.group.children.length > 1) { // keep orbitLinesGroup
-      const child = this.group.children[this.group.children.length - 1];
-      if (child !== this.orbitLinesGroup) {
-        this.group.remove(child);
-      }
-    }
-    while (this.orbitLinesGroup.children.length > 0) {
-      this.orbitLinesGroup.remove(this.orbitLinesGroup.children[0]);
-    }
-    this.planetsMap.clear();
+    this.clearBodies();
 
     PLANET_EPHEMERIS.forEach((planet) => {
       // 1. Calculate 3D position in AU at user's current date
@@ -101,6 +120,7 @@ export class SolSystemRenderer {
       });
     });
 
+    this.setPlaneAlignment(this.alignment);
     console.log(`🪐 [SolSystemRenderer] Real-time planet positions generated for all 9 planets.`);
   }
 

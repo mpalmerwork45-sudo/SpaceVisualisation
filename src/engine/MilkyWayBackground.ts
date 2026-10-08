@@ -110,6 +110,9 @@ export class MilkyWayBackground {
     this.material.color.setScalar(mode === 'darkAdaptedEye' ? 0.22 : 1);
   }
 
+  /** Restored render targets contain no pixels, even when the view is unchanged. */
+  public invalidate() { this.dirty = true; }
+
   /** Physical navigation moves through the Galaxy. Nonphysical distance maps
    * deliberately retain Sol's sky; their compressed positions are not kpc. */
   public update(renderer: THREE.WebGLRenderer, camera: THREE.PerspectiveCamera, viewMode: ViewMode) {

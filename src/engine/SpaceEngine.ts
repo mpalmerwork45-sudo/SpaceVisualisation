@@ -6,9 +6,11 @@ import { DeepSpaceRenderer } from './DeepSpaceRenderer';
 import { GridRenderer } from './GridRenderer';
 import { MilkyWayBackground, MilkyWayMode } from './MilkyWayBackground';
 import { StarFieldBackground } from './StarFieldBackground';
-import { galacticFrameQuaternion, orbitOffset, scaleDistance, viewDirectionToOrbitAngles, ViewMode } from '../utils/coordinates';
-import { StarData } from '../data/stars';
+import { frameRotation, galacticFrameQuaternion, orbitOffset, scaleDistance, viewDirectionToOrbitAngles, ViewMode } from '../utils/coordinates';
+import { StarData, STARS_CATALOG } from '../data/stars';
 import { DeepSpaceObjectData } from '../data/deepSpace';
+import { CONSTELLATIONS } from '../data/constellations';
+import { isSelectableHit, selectableObjects } from './ObjectPicking';
 
 export type SelectedObjectType = 'star' | 'planet' | 'deepSpace' | 'constellation' | null;
 
@@ -48,6 +50,9 @@ export class SpaceEngine {
   public viewMode: ViewMode = 'linear';
   public planeAlignment: PlaneAlignment = 'ecliptic';
   public observationMode: 'darkAdaptedEye' | 'enhancedOptical' = 'darkAdaptedEye';
+  public spectralFilter = 'ALL';
+  public focusedPlanetId: string | null = null;
+  public activePreset: CameraPreset | null = 'sol_center';
 
   private raycaster: THREE.Raycaster;
   private mouse: THREE.Vector2;
@@ -72,11 +77,15 @@ export class SpaceEngine {
 
   private isDragging: boolean = false;
   private previousMousePosition = { x: 0, y: 0 };
+  private pointerStart = { x: 0, y: 0 };
+  private suppressClick = false;
+  private pointers = new Map<number, THREE.Vector2>();
 
   // Callbacks
   public onSelectObject?: (selection: ObjectSelection) => void;
   public onHoverObject?: (hovered: ObjectSelection | null, screenPos: { x: number; y: number }) => void;
   public onRenderFrame?: () => void;
+  public onStateChange?: () => void;
 
   private clock: THREE.Clock;
   private animationFrameId: number | null = null;
@@ -222,6 +231,8 @@ export class SpaceEngine {
   public setViewMode(mode: ViewMode) {
     console.log(`🔄 [SpaceEngine] View mode changed to "${mode}"`);
     this.viewMode = mode;
+    this.focusedPlanetId = null;
+    this.activePreset = null;
     this.targetCameraFov = 55;
 
     if (mode === 'realistic') {
@@ -242,6 +253,8 @@ export class SpaceEngine {
     this.deepSpaceRenderer.setExposure(mode === 'enhancedOptical' ? 1.45 : 0.72);
     this.milkyWay.setObservationMode(mode);
     this.starField.setObservationMode(mode);
+    this.starRenderer.setObservationMode(mode);
+    this.onStateChange?.();
   }
 
   public async setMilkyWayMode(mode: MilkyWayMode) {
@@ -251,17 +264,66 @@ export class SpaceEngine {
 
   public setPlaneAlignment(alignment: PlaneAlignment) {
     console.log(`🔄 [SpaceEngine] Alignment changed to "${alignment}"`);
+    const rotation = frameRotation(this.planeAlignment, alignment);
+    this.cameraTarget.applyQuaternion(rotation);
+    this.targetCameraTarget.applyQuaternion(rotation);
+    const current = viewDirectionToOrbitAngles(orbitOffset(1, this.cameraTheta, this.cameraPhi).applyQuaternion(rotation).negate());
+    const target = viewDirectionToOrbitAngles(orbitOffset(1, this.targetCameraTheta, this.targetCameraPhi).applyQuaternion(rotation).negate());
+    this.cameraTheta = current.theta;
+    this.cameraPhi = current.phi;
+    this.targetCameraTheta = target.theta;
+    this.targetCameraPhi = target.phi;
+    // Preserve physical heading and roll, including a turn-in-place sightline.
+    this.camera.up.applyQuaternion(rotation);
+    this.skyLookDirection?.applyQuaternion(rotation);
     this.planeAlignment = alignment;
+    this.activePreset = null;
     this.milkyWay.setPlaneAlignment(alignment);
     this.starField.setPlaneAlignment(alignment);
     this.rebuildAllData();
+    this.updateCameraPosition();
+  }
+
+  public setSpectralFilter(filter: string) {
+    this.spectralFilter = filter;
+    this.starRenderer.updateStars(this.viewMode, this.planeAlignment, filter);
+    this.constellationRenderer.updateConstellations(this.starRenderer, this.viewMode, this.planeAlignment);
+    this.onStateChange?.();
+  }
+
+  /** Resolve by identity at action time; never reuse coordinates from an old view. */
+  public resolveSelection(type: SelectedObjectType, id: string): ObjectSelection | null {
+    if (type === 'star') {
+      const data = STARS_CATALOG.find(star => star.id === id);
+      return data ? { type, data, position: this.starRenderer.calculateStarPosition(data, this.viewMode, this.planeAlignment) } : null;
+    }
+    if (type === 'planet') {
+      const node = this.solSystemRenderer.planetsMap.get(id);
+      return node ? { type, data: node.data, position: node.mesh.getWorldPosition(new THREE.Vector3()) } : null;
+    }
+    if (type === 'deepSpace') {
+      const node = this.deepSpaceRenderer.objectsMap.get(id);
+      return node ? { type, data: node.data, position: node.position.clone() } : null;
+    }
+    if (type === 'constellation') {
+      const data = CONSTELLATIONS.find(item => item.id === id);
+      if (!data) return null;
+      const ids = new Set(data.lines.flat());
+      const positions = STARS_CATALOG.filter(star => ids.has(star.id))
+        .map(star => this.starRenderer.calculateStarPosition(star, this.viewMode, this.planeAlignment));
+      const position = positions.reduce((sum, point) => sum.add(point), new THREE.Vector3()).divideScalar(positions.length || 1);
+      return { type, data, position };
+    }
+    return null;
   }
 
   public rebuildAllData() {
-    this.starRenderer.updateStars(this.viewMode, this.planeAlignment);
+    this.starRenderer.updateStars(this.viewMode, this.planeAlignment, this.spectralFilter);
+    this.solSystemRenderer.setPlaneAlignment(this.planeAlignment);
     this.constellationRenderer.updateConstellations(this.starRenderer, this.viewMode, this.planeAlignment);
     this.deepSpaceRenderer.updateDeepSpace(this.viewMode, this.planeAlignment);
     this.gridRenderer.updateGrid(this.viewMode, this.planeAlignment);
+    this.onStateChange?.();
   }
 
   public setPresetViewpoint(preset: CameraPreset) {
@@ -279,17 +341,19 @@ export class SpaceEngine {
       this.skyLookDirection = new THREE.Vector3(centreDistance, 0, 0)
         .applyQuaternion(galacticFrameQuaternion(this.planeAlignment))
         .sub(this.camera.position).normalize();
+      this.activePreset = 'galactic_center';
+      this.onStateChange?.();
       return;
     }
+    const previousHeading = this.camera.getWorldDirection(new THREE.Vector3());
     this.skyLookDirection = null;
+    this.focusedPlanetId = null;
     this.targetCameraRoll = 0;
     this.targetCameraFov = 55;
 
     if (preset === 'sol_center') {
       this.viewMode = 'linear';
-      this.planeAlignment = 'ecliptic';
-      this.milkyWay.setPlaneAlignment('ecliptic');
-      this.starField.setPlaneAlignment('ecliptic');
+      this.setPlaneAlignment('ecliptic');
       this.gridRenderer.setRingsVisible(false);
       this.gridRenderer.setGridVisible(true);
       this.rebuildAllData();
@@ -301,9 +365,7 @@ export class SpaceEngine {
         new THREE.Vector3(1, 0, 0).applyQuaternion(galacticFrameQuaternion('ecliptic'))
       );
     } else if (preset === 'look_galactic_pole') {
-      this.planeAlignment = 'galactic';
-      this.milkyWay.setPlaneAlignment('galactic');
-      this.starField.setPlaneAlignment('galactic');
+      this.setPlaneAlignment('galactic');
       this.viewMode = 'linear';
       this.gridRenderer.setRingsVisible(true);
       this.gridRenderer.setGridVisible(true);
@@ -312,9 +374,7 @@ export class SpaceEngine {
       this.targetCameraRadius = 85;
       this.setTargetViewDirection(new THREE.Vector3(0, -1, 0));
     } else if (preset === 'ecliptic_north') {
-      this.planeAlignment = 'ecliptic';
-      this.milkyWay.setPlaneAlignment('ecliptic');
-      this.starField.setPlaneAlignment('ecliptic');
+      this.setPlaneAlignment('ecliptic');
       this.viewMode = 'linear';
       this.gridRenderer.setRingsVisible(true);
       this.gridRenderer.setGridVisible(true);
@@ -331,15 +391,22 @@ export class SpaceEngine {
       this.targetCameraTarget.set(0, 0, 0);
       this.targetCameraRadius = 0.01;
       // Preserve the current heading when entering the observer's sky.
+      this.setTargetViewDirection(previousHeading);
     }
+    if (preset !== 'realistic_sky') this.camera.up.set(0, 1, 0);
+    this.activePreset = preset;
+    this.onStateChange?.();
   }
 
   public flyToPosition(targetPos: THREE.Vector3, focusRadius: number = 15) {
     this.skyLookDirection = null;
+    this.focusedPlanetId = null;
+    this.activePreset = null;
     console.log(`✈️ [SpaceEngine] Smooth gliding flight to target position:`, targetPos);
     this.targetCameraTarget.copy(targetPos);
     this.targetCameraRadius = THREE.MathUtils.clamp(focusRadius, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
     this.targetCameraFov = 55;
+    this.onStateChange?.();
   }
 
   public focusPlanet(id: string) {
@@ -352,11 +419,16 @@ export class SpaceEngine {
     const radial = planet.mesh.position.clone().negate().normalize().add(new THREE.Vector3(0, 0.4, 0.25)).normalize();
     this.setTargetViewDirection(radial.negate());
     this.targetCameraRoll = 0;
+    this.camera.up.set(0, 1, 0);
+    this.focusedPlanetId = id;
+    this.onStateChange?.();
   }
 
   /** Face a sky direction while keeping the observer at Sol. */
   public focusSkyDirection(targetPos: THREE.Vector3, fieldOfViewDeg: number = 12) {
     this.skyLookDirection = null;
+    this.focusedPlanetId = null;
+    this.activePreset = null;
     const direction = targetPos.clone().normalize();
     if (direction.lengthSq() === 0) return;
 
@@ -364,6 +436,7 @@ export class SpaceEngine {
     this.targetCameraRadius = 0.01;
     this.setTargetViewDirection(direction);
     this.targetCameraFov = THREE.MathUtils.clamp(fieldOfViewDeg, 0.05, 75);
+    this.onStateChange?.();
   }
 
   /** Focus an extended catalogue object at a useful multiple of its angular size. */
@@ -412,7 +485,8 @@ export class SpaceEngine {
     this.deepSpaceRenderer.dispose();
     this.starField.dispose();
     this.milkyWay.dispose();
-    this.scene.remove(this.deepSpaceRenderer.group, this.starField.points, this.milkyWay.mesh);
+    this.solSystemRenderer.dispose();
+    this.scene.remove(this.deepSpaceRenderer.group, this.starField.points, this.milkyWay.mesh, this.solSystemRenderer.group);
     this.scene.traverse(object => {
       if (object instanceof THREE.Mesh || object instanceof THREE.Points || object instanceof THREE.Line) {
         object.geometry.dispose();
@@ -432,18 +506,36 @@ export class SpaceEngine {
     window.addEventListener('resize', this.onWindowResize, { signal });
 
     const dom = this.renderer.domElement;
+    dom.addEventListener('webglcontextlost', event => event.preventDefault(), { signal });
+    dom.addEventListener('webglcontextrestored', () => this.milkyWay.invalidate(), { signal });
 
-    dom.addEventListener('mousedown', (e) => {
+    dom.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      dom.setPointerCapture(e.pointerId);
+      this.pointers.set(e.pointerId, new THREE.Vector2(e.clientX, e.clientY));
       this.isDragging = true;
+      this.suppressClick = false;
+      this.pointerStart = { x: e.clientX, y: e.clientY };
       this.previousMousePosition = { x: e.clientX, y: e.clientY };
     }, { signal });
 
-    dom.addEventListener('mousemove', (e) => {
-      const rect = dom.getBoundingClientRect();
-      this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    dom.addEventListener('pointermove', (e) => {
+      this.updatePointer(e.clientX, e.clientY);
+      const previous = this.pointers.get(e.pointerId);
+      if (previous && this.pointers.size === 2) {
+        const other = [...this.pointers.entries()].find(([id]) => id !== e.pointerId)![1];
+        const oldDistance = previous.distanceTo(other);
+        previous.set(e.clientX, e.clientY);
+        const newDistance = previous.distanceTo(other);
+        if (newDistance > 0 && oldDistance > 0) this.targetCameraRadius = THREE.MathUtils.clamp(this.targetCameraRadius * oldDistance/newDistance, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
+        this.suppressClick = true;
+        this.previousMousePosition = { x: e.clientX, y: e.clientY };
+        return;
+      }
+      previous?.set(e.clientX, e.clientY);
 
       if (this.isDragging) {
+        if (Math.hypot(e.clientX - this.pointerStart.x, e.clientY - this.pointerStart.y) > 4) this.suppressClick = true;
         const deltaX = e.clientX - this.previousMousePosition.x;
         const deltaY = e.clientY - this.previousMousePosition.y;
 
@@ -465,18 +557,22 @@ export class SpaceEngine {
         this.cameraPhi = this.targetCameraPhi;
 
         this.previousMousePosition = { x: e.clientX, y: e.clientY };
+        return;
       }
 
       this.checkHover(e.clientX, e.clientY);
     }, { signal });
 
-    dom.addEventListener('mouseup', () => {
-      this.isDragging = false;
-    }, { signal });
-
-    dom.addEventListener('mouseleave', () => {
-      this.isDragging = false;
-    }, { signal });
+    const releasePointer = (e: PointerEvent) => {
+      this.pointers.delete(e.pointerId);
+      this.isDragging = this.pointers.size > 0;
+      const remaining = [...this.pointers.values()][0];
+      if (remaining) this.previousMousePosition = { x: remaining.x, y: remaining.y };
+      if (dom.hasPointerCapture(e.pointerId)) dom.releasePointerCapture(e.pointerId);
+    };
+    dom.addEventListener('pointerup', releasePointer, { signal });
+    dom.addEventListener('pointercancel', releasePointer, { signal });
+    dom.addEventListener('lostpointercapture', releasePointer, { signal });
 
     dom.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -488,61 +584,61 @@ export class SpaceEngine {
       );
     }, { passive: false, signal });
 
-    dom.addEventListener('click', () => {
+    dom.addEventListener('click', e => {
+      if (this.suppressClick) { this.suppressClick = false; return; }
+      this.updatePointer(e.clientX, e.clientY);
       this.checkClick();
     }, { signal });
+  }
+
+  private updatePointer(x: number, y: number) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.set((x - rect.left) / rect.width * 2 - 1, -(y - rect.top) / rect.height * 2 + 1);
+  }
+
+  private pickObject(): ObjectSelection | null {
+    this.scene.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld(true);
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    // A fixed pixel hit tolerance; the default 1-world-unit line threshold
+    // swallowed the entire AU-scale Solar System.
+    const objects = selectableObjects([this.starRenderer.group, this.solSystemRenderer.group, this.deepSpaceRenderer.group, this.constellationRenderer.group]);
+    const hits = this.raycaster.intersectObjects(objects.filter(object => !(object instanceof THREE.LineSegments)), false);
+    const angularTolerance = 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov/2)) * 4 / (this.renderer.domElement.clientHeight || 1000);
+    objects.forEach(object => {
+      if (!(object instanceof THREE.LineSegments)) return;
+      object.geometry.computeBoundingSphere();
+      const centre = object.localToWorld(object.geometry.boundingSphere!.center.clone());
+      this.raycaster.params.Line!.threshold = Math.max(this.camera.near, this.camera.position.distanceTo(centre)) * angularTolerance;
+      this.raycaster.intersectObject(object, false, hits);
+    });
+    hits.sort((a, b) => a.distance - b.distance);
+    for (const hit of hits) {
+      if (!isSelectableHit(hit)) continue;
+      const info = hit.object.userData;
+      const data = info.starData || info.planetData || info.deepObjectData || info.constellationData;
+      if (data) return this.resolveSelection(info.type, data.id);
+    }
+    return null;
   }
 
   private checkHover(screenX: number, screenY: number) {
     if (!this.onHoverObject) return;
 
-    this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(this.scene.children, true);
-
-    if (intersects.length > 0) {
-      for (const hit of intersects) {
-        const userData = hit.object.userData;
-        if (userData && userData.type) {
-          let data = userData.starData || userData.planetData || userData.deepObjectData;
-          if (data) {
-            const worldPosition = hit.object.getWorldPosition(new THREE.Vector3());
-            this.onHoverObject({
-              type: userData.type,
-              data,
-              position: worldPosition
-            }, { x: screenX, y: screenY });
-            document.body.style.cursor = 'pointer';
-            return;
-          }
-        }
-      }
+    const selection = this.pickObject();
+    if (selection) {
+      this.onHoverObject(selection, { x: screenX, y: screenY });
+      this.renderer.domElement.style.cursor = 'pointer';
+      return;
     }
 
     this.onHoverObject(null, { x: 0, y: 0 });
-    document.body.style.cursor = 'default';
+    this.renderer.domElement.style.cursor = 'grab';
   }
 
   private checkClick() {
-    this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersects = this.raycaster.intersectObjects(this.scene.children, true);
-
-    if (intersects.length > 0) {
-      for (const hit of intersects) {
-        const userData = hit.object.userData;
-        if (userData && userData.type) {
-          let data = userData.starData || userData.planetData || userData.deepObjectData;
-          if (data && this.onSelectObject) {
-            const worldPosition = hit.object.getWorldPosition(new THREE.Vector3());
-            this.onSelectObject({
-              type: userData.type,
-              data,
-              position: worldPosition
-            });
-            return;
-          }
-        }
-      }
-    }
+    const selection = this.pickObject();
+    if (selection) this.onSelectObject?.(selection);
   }
 
   private onWindowResize = () => {
@@ -556,6 +652,7 @@ export class SpaceEngine {
   private animate = () => {
     if (this.disposed) return;
     this.animationFrameId = requestAnimationFrame(this.animate);
+    if (this.renderer.getContext().isContextLost()) return;
 
     const elapsedTime = this.clock.getElapsedTime();
 

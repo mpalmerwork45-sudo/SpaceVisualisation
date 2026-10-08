@@ -121,6 +121,11 @@ export function galacticFrameQuaternion(alignment: CelestialAlignment): THREE.Qu
     .normalize();
 }
 
+/** Change coordinate basis without changing an object's physical location. */
+export function frameRotation(from: CelestialAlignment, to: CelestialAlignment): THREE.Quaternion {
+  return galacticFrameQuaternion(to).multiply(galacticFrameQuaternion(from).invert());
+}
+
 /** Spherical orbit offset from a target in the renderer's +Y-up frame. */
 export function orbitOffset(radius: number, theta: number, phi: number): THREE.Vector3 {
   return new THREE.Vector3(

@@ -65,6 +65,7 @@ canvas {
   display: block;
   width: 100%;
   height: 100%;
+  touch-action: none;
 }
 
 .sky-credit {
@@ -221,10 +222,7 @@ canvas {
 
 /* NAVBAR */
 .navbar {
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  right: 16px;
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -376,10 +374,10 @@ button.active {
 
 /* SEARCH BAR */
 .search-container {
-  position: absolute;
-  top: 84px;
-  left: 16px;
-  width: 400px;
+  position: relative;
+  width: min(400px, 100%);
+  min-width: 0;
+  z-index: 3;
 }
 
 .search-box {
@@ -460,12 +458,8 @@ button.active {
 
 /* SINGLE AXIS TILT HUD PANEL */
 .axis-hud-panel {
-  position: absolute;
-  top: 144px;
-  left: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  position: relative;
+  min-width: 0;
   background: var(--panel-bg);
   backdrop-filter: blur(16px);
   border: 1px solid var(--panel-border);
@@ -599,9 +593,13 @@ button.active {
 /* DETAIL MODAL */
 .detail-modal {
   position: absolute;
-  top: 84px;
+  top: 16px;
   right: 16px;
-  width: 380px;
+  width: min(380px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 20;
   background: var(--panel-bg);
   backdrop-filter: blur(20px);
   border: 1px solid var(--panel-border);
@@ -612,8 +610,8 @@ button.active {
 }
 
 @keyframes slideIn {
-  from { opacity: 0; transform: translateX(30px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .btn-close {
@@ -712,4 +710,58 @@ button.active {
 
 .hidden {
   display: none !important;
+}
+
+/* The top layout follows content height; no overlapping fixed offsets. */
+.top-controls { position: absolute; inset: 16px 16px auto; }
+.navbar { gap: 16px; align-items: flex-start; }
+.brand { flex-shrink: 0; }
+.navigation-options { min-width: 0; flex: 1; pointer-events: auto; }
+.navigation-options > summary { width: fit-content; margin-left: auto; padding: 7px 12px; border: 1px solid #71859b50; border-radius: 8px; font-size: 12px; cursor: pointer; }
+.navigation-options[open] > summary { margin-bottom: 8px; }
+.nav-controls { flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-height: 36dvh; overflow-y: auto; overscroll-behavior: contain; }
+.control-group { flex-wrap: wrap; max-width: 100%; }
+.exploration-toolbar { display: flex; align-items: flex-start; gap: 10px; margin-top: 10px; }
+.axis-hud-panel { flex: 0 1 720px; max-width: 100%; padding: 10px 14px; }
+.axis-hud-panel > summary { cursor: pointer; }
+.axis-hud-panel[open] > summary { margin-bottom: 10px; }
+.axis-telemetry-readout { margin-top: 8px; }
+.spectral-filter-bar { max-width: calc(100% - 32px); overflow-x: auto; white-space: nowrap; }
+.spectral-filter-bar > * { flex-shrink: 0; }
+.toggle-switch { position: relative; }
+.toggle-switch input { display: block; position: absolute; opacity: 0; width: 30px; height: 20px; }
+.toggle-switch:focus-within .slider { outline: 2px solid #e0e6ed; outline-offset: 3px; }
+button:focus-visible, summary:focus-visible, input:focus-visible { outline: 2px solid #c7dfef; outline-offset: 3px; }
+
+@media (max-width: 700px) {
+  .top-controls { inset: 8px 8px auto; }
+  .navbar { padding: 10px; gap: 8px; flex-wrap: wrap; }
+  .brand-text h1 { font-size: 13px; letter-spacing: 0.04em; }
+  .brand-text .subtext { display: none; }
+  .brand { gap: 6px; }
+  .logo-icon { font-size: 18px; }
+  .navigation-options { flex: 1 1 115px; }
+  .navigation-options[open] { flex-basis: 100%; }
+  .navigation-options > summary { padding: 6px 8px; font-size: 11px; }
+  .nav-controls { justify-content: flex-start; max-height: 32dvh; }
+  .control-group { width: 100%; padding: 6px; }
+  .group-label { flex-basis: 100%; }
+  .toggles-group { gap: 10px; }
+  .exploration-toolbar { flex-direction: column; gap: 8px; margin-top: 8px; }
+  .search-container { width: 100%; }
+  .axis-hud-panel { flex: auto; width: 100%; max-height: 26dvh; overflow-y: auto; }
+  .axis-label { flex-basis: 100%; }
+  .axis-btn-row { gap: 5px; }
+  .axis-telemetry-readout { line-height: 1.6; }
+  .sound-controls { flex-wrap: wrap; border: 0; padding: 0; }
+  .spectral-filter-bar { bottom: 8px; max-width: calc(100% - 16px); padding: 8px; gap: 4px; }
+  .filter-title { display: none; }
+  .btn-spectral { padding: 7px 8px; }
+  .planet-nav { bottom: 60px; width: calc(100% - 16px); }
+  .planet-nav-heading { gap: 10px; }
+  .planet-stop { min-height: 44px; }
+  .detail-modal { top: 8px; right: 8px; width: calc(100% - 16px); max-height: calc(100dvh - 16px); padding: 20px 16px; }
+  .modal-grid { gap: 6px; }
+  .stat-box { padding: 8px; overflow-wrap: anywhere; }
+  .sky-credit { bottom: 185px; font-size: 9px; max-width: calc(100% - 16px); }
 }

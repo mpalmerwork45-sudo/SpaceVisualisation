@@ -22,6 +22,14 @@ function harness() {
 }
 
 describe('procedural radiance pass', () => {
+  it('reintegrates an unchanged view after WebGL context restoration', () => {
+    const { sky, renderer, target, draw } = harness();
+    draw(); draw();
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    sky.invalidate(); draw(); draw();
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    sky.dispose(); target.dispose();
+  });
   it('reuses a static view, including exposure changes, but invalidates pose / FOV / size / frame', () => {
     const { sky, camera, renderer, size, target, draw } = harness();
     draw(); draw();

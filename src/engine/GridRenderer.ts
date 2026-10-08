@@ -45,6 +45,8 @@ export class GridRenderer {
     this.ringsGroup.visible = visible;
   }
 
+  public get ringsVisible() { return this.ringsGroup.visible; }
+
   public updateGrid(viewMode: ViewMode, _planeAlignment: PlaneAlignment) {
     this.createDistanceRings(viewMode);
   }

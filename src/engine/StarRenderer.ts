@@ -12,6 +12,11 @@ import {
 
 export type PlaneAlignment = CelestialAlignment;
 
+export function matchesSpectralFilter(star: StarData, filter: string): boolean {
+  const spectral = star.spectral.trim().toUpperCase();
+  return filter === 'ALL' || (filter === 'BD' ? /^[LTY]/.test(spectral) : spectral.startsWith(filter));
+}
+
 export interface RenderedStarNode {
   data: StarData;
   position: THREE.Vector3;
@@ -22,6 +27,35 @@ export interface RenderedStarNode {
 export class StarRenderer {
   public group: THREE.Group;
   public starsMap: Map<string, RenderedStarNode> = new Map();
+  private viewMode: ViewMode = 'linear';
+  private observationMode: 'darkAdaptedEye' | 'enhancedOptical' = 'darkAdaptedEye';
+
+  public setObservationMode(mode: 'darkAdaptedEye' | 'enhancedOptical') {
+    this.observationMode = mode;
+    this.updatePhotometry();
+  }
+
+  private updatePhotometry() {
+    const realistic = this.viewMode === 'realistic';
+    const enhanced = this.observationMode === 'enhancedOptical';
+    // An illustrative dark-sky visual limit, not a telescope or physiological
+    // calibration. Map markers deliberately retain the full catalogue.
+    const limit = enhanced ? 14 : 6.5;
+    this.starsMap.forEach(node => {
+      node.mesh.visible = !realistic || node.data.mag <= limit;
+      const material = node.mesh.material as THREE.MeshBasicMaterial;
+      const color = new THREE.Color(getSpectralColor(node.data.spectral));
+      if (realistic) {
+        if (!enhanced) color.lerp(new THREE.Color(1, 1, 1), 0.8);
+        // Pogson flux ratio; apparent area also grows with brightness below.
+        // Compress only the bright end to keep the display in range.
+        const flux = Math.pow(10, -0.4 * (node.data.mag - limit));
+        color.multiplyScalar(Math.min(3, 0.035 * flux));
+      }
+      material.color.copy(color);
+      material.toneMapped = realistic;
+    });
+  }
 
   constructor() {
     this.group = new THREE.Group();
@@ -29,7 +63,7 @@ export class StarRenderer {
   }
 
   public calculateStarPosition(star: StarData, viewMode: ViewMode, planeAlignment: PlaneAlignment): THREE.Vector3 {
-    if (viewMode === 'realistic') {
+    if (viewMode === 'realistic' && star.id !== 'sol') {
       const eqPos = equatorialToCartesian(star.ra, star.dec, 1200);
       if (planeAlignment === 'galactic') return equatorialToGalactic(eqPos);
       if (planeAlignment === 'ecliptic') return equatorialToEcliptic(eqPos);
@@ -55,6 +89,7 @@ export class StarRenderer {
     maxDistLy: number = 100000
   ) {
     console.log(`⭐ [StarRenderer] Updating stars (Mode: ${viewMode}, Alignment: ${planeAlignment}, Filter: ${spectralFilter})...`);
+    this.viewMode = viewMode;
 
     // Clear existing star meshes
     while (this.group.children.length > 0) {
@@ -74,11 +109,10 @@ export class StarRenderer {
     let countAdded = 0;
 
     STARS_CATALOG.forEach((star) => {
+      // Sol is the observer, not an extra star at the catalogue's placeholder RA.
+      if (viewMode === 'realistic' && star.id === 'sol') return;
       if (viewMode !== 'realistic' && maxDistLy < 10000 && star.dist > maxDistLy) return;
-      if (spectralFilter !== 'ALL') {
-        const firstChar = star.spectral.trim().toUpperCase().charAt(0);
-        if (firstChar !== spectralFilter) return;
-      }
+      if (!matchesSpectralFilter(star, spectralFilter)) return;
 
       const pos = this.calculateStarPosition(star, viewMode, planeAlignment);
       const colorHex = getSpectralColor(star.spectral);
@@ -121,6 +155,7 @@ export class StarRenderer {
     });
 
     console.log(`⭐ [StarRenderer] Rendered ${countAdded} pinpoint star nodes.`);
+    this.updatePhotometry();
   }
 
   /**
@@ -132,12 +167,15 @@ export class StarRenderer {
 
     this.starsMap.forEach((node) => {
       const distToCam = camera.position.distanceTo(node.position);
+      if (!node.mesh.visible) return;
 
       if (node.data.id !== 'sol') {
         // Distant stars remain unresolved when the field of view narrows.
         // Otherwise telescope-like zoom turns catalogue points into huge discs.
         const height = typeof window === 'undefined' ? 1000 : window.innerHeight;
-        const pixelRadius = THREE.MathUtils.clamp(2.3 - node.data.mag * 0.18, 0.65, 2.6);
+        const pixelRadius = this.viewMode === 'realistic'
+          ? THREE.MathUtils.clamp(1.3 * Math.pow(10, -0.08 * node.data.mag), 0.6, 2.5)
+          : THREE.MathUtils.clamp(2.3 - node.data.mag * 0.18, 0.65, 2.6);
         const radius = distToCam * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov/2)) * pixelRadius / height;
         const geometryRadius = (node.mesh.geometry as THREE.SphereGeometry).parameters.radius;
         node.mesh.scale.setScalar(radius / geometryRadius);

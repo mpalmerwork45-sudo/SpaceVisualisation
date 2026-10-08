@@ -10,6 +10,7 @@ import { PlanetLabelOverlay } from './PlanetLabelOverlay';
 import { PLANET_APPEARANCE } from '../data/planetAppearance';
 import { LY_PER_AU } from '../utils/ephemeris';
 import { Vector3 } from 'three';
+import { matchesSpectralFilter } from '../engine/StarRenderer';
 
 export class UIManager {
   private engine: SpaceEngine;
@@ -38,6 +39,8 @@ export class UIManager {
     this.planetLabelOverlay = new PlanetLabelOverlay(engine, labelsContainer, id => this.selectAndFlyToObject(id));
 
     this.bindEngineCallbacks();
+    this.engine.onStateChange = () => this.syncEngineControls();
+    this.syncEngineControls();
 
     this.engine.onRenderFrame = () => {
       this.labelOverlay.updateLabels();
@@ -51,6 +54,7 @@ export class UIManager {
   private createUIOverlay() {
     this.uiContainer.innerHTML = `
       <!-- MAIN TOP NAVIGATION BAR -->
+      <div class="top-controls">
       <header class="navbar">
         <div class="brand">
           <div class="logo-icon">✨</div>
@@ -60,6 +64,8 @@ export class UIManager {
           </div>
         </div>
 
+        <details class="navigation-options" id="navigation-options">
+        <summary>Explore & settings</summary>
         <div class="nav-controls">
           <!-- VIEW MODE SELECTOR -->
           <div class="control-group">
@@ -137,9 +143,11 @@ export class UIManager {
             </button>
           </div>
         </div>
+        </details>
       </header>
 
       <!-- SEARCH BAR -->
+      <div class="exploration-toolbar">
       <div class="search-container">
         <div class="search-box">
           <span class="search-icon">🔍</span>
@@ -149,8 +157,8 @@ export class UIManager {
       </div>
 
       <!-- SINGLE AXIS ORIENTATION CONTROL HUD -->
-      <div class="axis-hud-panel">
-        <div class="axis-hud-title">📐 Single Axis Tilt & Orientation</div>
+      <details class="axis-hud-panel" id="orientation-options">
+        <summary class="axis-hud-title">View angle & orientation</summary>
         <div class="axis-btn-row">
           <span class="axis-label">Pitch (Elevation):</span>
           <button id="btn-pitch-up" class="btn-axis" title="Tilt camera Up (Pitch +5°)">Pitch ▲</button>
@@ -178,6 +186,8 @@ export class UIManager {
           <input id="view-fov" type="range" min="0" max="100" step="0.1" value="93.4" aria-label="Field of view" />
           <output id="view-fov-value" for="view-fov">55°</output>
         </div>
+      </details>
+      </div>
       </div>
 
       <!-- SPECTRAL FILTER BAR -->
@@ -199,7 +209,7 @@ export class UIManager {
         <button class="btn-spectral" data-class="G" style="--sc-color: #fff4ea">G (Sol)</button>
         <button class="btn-spectral" data-class="K" style="--sc-color: #ffd2a1">K</button>
         <button class="btn-spectral" data-class="M" style="--sc-color: #ffa06d">M</button>
-        <button class="btn-spectral" data-class="L" style="--sc-color: #d24836" title="L, T, Y Brown Dwarfs">🟤 BD (L/T/Y)</button>
+        <button class="btn-spectral" data-class="BD" style="--sc-color: #d24836" title="L, T, Y Brown Dwarfs">🟤 BD (L/T/Y)</button>
       </div>
 
       <!-- HOVER TOOLTIP -->
@@ -220,6 +230,11 @@ export class UIManager {
     this.modalElem = document.getElementById('detail-modal')!;
     this.searchInput = document.getElementById('search-input') as HTMLInputElement;
     this.searchResultsElem = document.getElementById('search-results')!;
+    // Keep the sky usable on smaller screens; every control remains accessible
+    // in keyboard-operable disclosures with independently scrollable contents.
+    const wide = window.matchMedia('(min-width: 1600px)').matches;
+    (document.getElementById('navigation-options') as HTMLDetailsElement).open = wide;
+    (document.getElementById('orientation-options') as HTMLDetailsElement).open = wide;
 
     this.bindUIEvents();
   }
@@ -249,6 +264,23 @@ export class UIManager {
     }
 
     readout.textContent = `Pitch: ${pitchDeg}° | Yaw: ${yawDeg}° | Roll: ${rollDeg}° | View Scale: ${radText}`;
+  }
+
+  private syncEngineControls() {
+    const modes = { linear: 'btn-mode-easy', logarithmic: 'btn-mode-log', realistic: 'btn-mode-real' };
+    Object.values(modes).forEach(id => document.getElementById(id)!.classList.toggle('active', id === modes[this.engine.viewMode]));
+    const presets = { sol_center: 'btn-view-sol', galactic_center: 'btn-center-galactic-center', look_galactic_pole: 'btn-top-g-pole' };
+    Object.entries(presets).forEach(([preset,id]) => document.getElementById(id)!.classList.toggle('active', preset === this.engine.activePreset));
+    document.getElementById('btn-plane-align')!.textContent = `🪐 Plane: ${this.engine.planeAlignment === 'galactic' ? 'Galactic' : 'Ecliptic'}`;
+    (document.getElementById('chk-rings') as HTMLInputElement).checked = this.engine.gridRenderer.ringsVisible;
+    (document.getElementById('chk-planet-orbits') as HTMLInputElement).checked = this.engine.solSystemRenderer.orbitsVisible;
+    document.querySelectorAll<HTMLElement>('.btn-spectral').forEach(button => button.classList.toggle('active', button.dataset.class === this.engine.spectralFilter));
+    document.querySelectorAll<HTMLElement>('[data-planet]').forEach(button => button.classList.toggle('active', button.dataset.planet === this.engine.focusedPlanetId));
+    const enhanced = this.engine.observationMode === 'enhancedOptical';
+    const exposure = document.getElementById('btn-exposure')!;
+    exposure.textContent = enhanced ? '📷 Enhanced Exposure' : '🌙 Eye Exposure';
+    exposure.classList.toggle('active', enhanced);
+    exposure.setAttribute('aria-pressed', String(enhanced));
   }
 
   private bindUIEvents() {
@@ -350,11 +382,17 @@ export class UIManager {
         return;
       }
 
-      if (e.key === '/' || (e.ctrlKey && e.key.toLowerCase() === 'f')) {
+      const active = document.activeElement as HTMLElement | null;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const editableSelector = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+      if (active?.closest(editableSelector) || target?.closest(editableSelector) || active?.isContentEditable || target?.isContentEditable) return;
+
+      if (e.key === '/' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f')) {
         e.preventDefault();
         this.searchInput.focus();
         return;
       }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -473,12 +511,7 @@ export class UIManager {
         spectralBtns.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const specClass = btn.getAttribute('data-class') || 'ALL';
-        this.engine.starRenderer.updateStars(this.engine.viewMode, this.engine.planeAlignment, specClass);
-        this.engine.constellationRenderer.updateConstellations(
-          this.engine.starRenderer,
-          this.engine.viewMode,
-          this.engine.planeAlignment
-        );
+        this.engine.setSpectralFilter(specClass);
       });
     });
 
@@ -506,6 +539,7 @@ export class UIManager {
     const q = query.trim().toLowerCase();
     if (q.length === 0) {
       this.searchResultsElem.classList.add('hidden');
+      this.searchResultsElem.replaceChildren();
       return;
     }
 
@@ -556,6 +590,7 @@ export class UIManager {
   }
 
   private selectTopSearchMatch() {
+    if (this.searchResultsElem.classList.contains('hidden') || !this.searchInput.value.trim()) return;
     const firstItem = this.searchResultsElem.querySelector('.search-item') as HTMLElement;
     if (firstItem) {
       const id = firstItem.getAttribute('data-id')!;
@@ -566,10 +601,13 @@ export class UIManager {
   }
 
   private selectAndFlyToObject(id: string) {
-    const starNode = this.engine.starRenderer.starsMap.get(id);
-    if (starNode) {
-      this.focusStarObject(starNode.data, starNode.position);
-      this.showDetailModal({ type: 'star', data: starNode.data, position: starNode.position });
+    const star = STARS_CATALOG.find(item => item.id === id);
+    if (star) {
+      // Search is catalogue-wide: reveal an explicitly requested filtered star.
+      if (!matchesSpectralFilter(star, this.engine.spectralFilter)) this.engine.setSpectralFilter('ALL');
+      const selection = this.engine.resolveSelection('star', id)!;
+      this.focusStarObject(star, selection.position);
+      this.showDetailModal(selection);
       return;
     }
 
@@ -578,7 +616,7 @@ export class UIManager {
       this.engine.focusPlanet(id);
       document.querySelectorAll<HTMLElement>('[data-planet]').forEach(button => button.classList.toggle('active', button.dataset.planet === id));
       document.getElementById('btn-plane-align')!.textContent = '🪐 Plane: Ecliptic';
-      this.showDetailModal({ type: 'planet', data: planetNode.data, position: planetNode.mesh.position });
+      this.showDetailModal(this.engine.resolveSelection('planet', id)!);
       return;
     }
 
@@ -591,6 +629,10 @@ export class UIManager {
   }
 
   private focusStarObject(data: StarData, position: Vector3) {
+    if (data.id === 'sol') {
+      this.engine.setPresetViewpoint('sol_center');
+      return;
+    }
     if (this.engine.viewMode === 'realistic') {
       this.engine.focusSkyDirection(position, 12);
       return;
@@ -787,8 +829,10 @@ export class UIManager {
       </div>
 
       <p class="modal-description">${d.description || 'Astronomical telemetry data.'}</p>
+      ${selection.type === 'star' && d.mag > 6.5 ? '<p class="modal-source">Below the unaided-eye sky limit. Use a 3D map to see its catalogue marker; enhanced sky exposure shows objects down to magnitude 14.</p>' : ''}
 
       ${d.galaxy?.source ? `<p class="modal-source">Appearance data: ${d.galaxy.source}.</p>` : ''}
+      ${selection.type === 'star' && d.source ? `<p class="modal-source">Astrometry and visual magnitude: <a href="${d.source}" target="_blank" rel="noopener noreferrer">CDS/SIMBAD</a>. Distances are parallax-derived estimates.</p>` : ''}
 
       <div class="modal-actions">
         <button id="btn-fly-focus" class="btn-action">🎯 Center Camera View</button>
@@ -796,14 +840,16 @@ export class UIManager {
     `;
 
     document.getElementById('btn-fly-focus')!.addEventListener('click', () => {
+      const current = this.engine.resolveSelection(selection.type, d.id);
+      if (!current) return;
       if (selection.type === 'deepSpace') {
-        this.focusDeepSpaceObject(d as DeepSpaceObjectData, selection.position);
+        this.focusDeepSpaceObject(d as DeepSpaceObjectData, current.position);
       } else if (selection.type === 'star') {
-        this.focusStarObject(d as StarData, selection.position);
+        this.focusStarObject(d as StarData, current.position);
       } else if (selection.type === 'constellation' && this.engine.viewMode === 'realistic') {
-        this.engine.focusSkyDirection(selection.position, 35);
+        this.engine.focusSkyDirection(current.position, 35);
       } else {
-        this.engine.flyToPosition(selection.position, selection.type === 'planet' ? 0.00005 : 15);
+        this.engine.flyToPosition(current.position, 15);
       }
     });
 

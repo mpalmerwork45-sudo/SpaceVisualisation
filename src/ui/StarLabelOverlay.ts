@@ -45,6 +45,7 @@ export class StarLabelOverlay {
 
     // 1. Gather all candidate stars currently in front of camera
     this.engine.starRenderer.starsMap.forEach((starNode, id) => {
+      if (!starNode.mesh.visible) return;
       // At planetary scale reserve the foreground for planet labels.
       if (this.engine.cameraRadius < 0.005 && this.engine.solSystemRenderer.group.visible && id !== 'sol') return;
       const star = starNode.data;
