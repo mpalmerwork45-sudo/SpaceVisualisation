@@ -191,4 +191,8 @@ export class StarRenderer {
     const distance = camera.position.distanceTo(this.sun.position);
     this.sun.scale.setScalar(THREE.MathUtils.clamp(distance * 0.015, 0.0001, 1));
   }
+
+  public get visibleSunRadius() {
+    return this.sun.visible && this.group.visible ? this.sun.geometry.parameters.radius * this.sun.scale.x : 0;
+  }
 }

@@ -478,6 +478,39 @@ try {
     }
   });
 
+  results.eyeAdaptation = await page.evaluate(() => {
+    const e = engine;
+    click('btn-view-sol');
+    e.setObservationMode('enhancedOptical');
+    e.setObservationMode('darkAdaptedEye');
+    const baseline = e.renderer.toneMappingExposure;
+    e.focusPlanet('earth'); snap();
+    e.updateEyeAdaptation(.6);
+    const planetExposure = e.renderer.toneMappingExposure;
+    check(planetExposure < baseline - .04, 'eye exposure falls when a sunlit planet fills part of the view');
+
+    const away = e.camera.position.clone().cross(new THREE.Vector3(0,1,0)).normalize();
+    e.turnInPlace(away); snap();
+    e.updateEyeAdaptation(.4);
+    const recovering = e.renderer.toneMappingExposure;
+    e.updateEyeAdaptation(10);
+    const recovered = e.renderer.toneMappingExposure;
+    check(planetExposure < recovering && recovering < baseline && recovered > baseline - .02,
+      'eye exposure recovers gradually when the foreground light leaves the view');
+
+    e.flyToPosition(new THREE.Vector3(), 3 / 63241.077); snap();
+    e.solSystemRenderer.group.visible = false;
+    e.updateEyeAdaptation(.6);
+    const sunExposure = e.renderer.toneMappingExposure;
+    check(sunExposure < baseline - .1, 'the foreground Sun reduces eye sensitivity');
+    e.setObservationMode('enhancedOptical');
+    const enhanced = e.renderer.toneMappingExposure;
+    e.updateEyeAdaptation(10);
+    check(e.renderer.toneMappingExposure === enhanced, 'enhanced exposure stays fixed around bright objects');
+    click('btn-view-sol'); snap();
+    return { baseline, planetExposure, recovering, recovered, sunExposure, enhanced };
+  });
+
   results.context = await page.evaluate(async () => {
     engine.setPresetViewpoint('realistic_sky');
     engine.setPlaneAlignment('galactic');
@@ -567,7 +600,7 @@ try {
   assert.deepEqual(runtimeErrors,[],`Browser runtime errors: ${runtimeErrors.join('; ')}`);
   results.errors = runtimeErrors;
   await writeFile(`${output}/results.json`,JSON.stringify(results,null,2));
-  console.log(`Passed ${results.checks.length} browser assertions covering audit items 1–10.`);
+  console.log(`Passed ${results.checks.length} browser assertions.`);
   console.log(JSON.stringify({frame:results.frame,resources:results.resources,context:results.context,output},null,2));
 } finally {
   await browser.close();

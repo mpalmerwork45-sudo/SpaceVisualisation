@@ -154,7 +154,7 @@ export class UIManager {
               <label title="Adds a colder, more dissonant undertone">Intensity <input id="sound-intensity" type="range" min="0" max="100" value="45" aria-label="Soundtrack intensity" /></label>
             </div>
 
-            <button id="btn-exposure" class="btn-icon" title="Eye: faint, muted diffuse light. Enhanced: brighter photographic-style colour. Neither is a calibrated vision simulation." aria-pressed="false">
+            <button id="btn-exposure" class="btn-icon" title="Eye exposure adapts to bright foreground objects. Enhanced exposure keeps a brighter, fixed setting." aria-pressed="false">
               🌙 Eye Exposure
             </button>
             <button id="btn-sky-source" class="btn-icon" title="Switch the Milky Way between a procedural render and an ESO photographic reference" aria-pressed="false">

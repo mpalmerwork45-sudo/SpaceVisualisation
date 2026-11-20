@@ -72,14 +72,10 @@ and a JSON timing/error report to the chosen temporary directory. Final review
 artifacts for this run were written to `/tmp/sky-verified`; they are not needed
 by the application and are not committed binary assets.
 
-## Remaining limits
+## Model limits
 
-This is a procedural illustration, not a survey reconstruction. Spiral arms
-are schematic and overly regular from outside; the local dust complex uses
-an approximate shell, not individual measured cloud distances. Synthetic stars
-remain a Solar-vantage angular population. External galaxies are projected
-surfaces, and individual nebular filaments are not measured structures.
-Exposure is a display convention, without luminance calibration, dynamic
-adaptation to bright planets, or a complete human-vision model. Blending of
-extended objects still uses the existing display-output material pipeline,
-not a fully linear HDR compositor for the entire scene.
+The Milky Way arms, dust shell and nebular filaments use illustrative density
+models. Synthetic star depths and galaxy volumes are procedural. The current
+eye response approximates adaptation from the visible foreground bodies.
+Extended-object blending uses the display-output material pipeline. The
+[rendering notes](galaxy-rendering.md) describe the current models and controls.

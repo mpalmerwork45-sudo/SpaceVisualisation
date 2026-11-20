@@ -101,9 +101,11 @@ Realistic Sky selects observer-centred angular geometry, hides the grid and
 selects Eye Exposure. Eye Exposure reduces diffuse radiance and mutes procedural
 Milky Way colour; Enhanced Exposure restores brighter photographic-style colour.
 Procedural diffuse nebulae use the same nearly monochrome eye-mode convention.
-This is a display approximation to dark adaptation, not a calibrated simulation
-of human vision. A bright foreground planet or Sun does not yet dynamically
-change adaptation. Photo mode is dimmed but retains its photographed colour.
+In the physical map, the apparent area of the Sun and nearby illuminated
+planets reduces Eye Exposure. Sensitivity recovers more slowly as bright objects
+leave the view. The brightness estimate uses the displayed bodies and an
+approximate planetary phase. Enhanced Exposure stays fixed. Photo mode retains
+its photographed colour under either exposure.
 
 Catalogue stars in the angular sky omit Sol (the observer), rather than placing
 it at its placeholder catalogue coordinates. Eye exposure has an illustrative

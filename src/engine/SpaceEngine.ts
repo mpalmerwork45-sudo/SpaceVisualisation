@@ -10,7 +10,7 @@ import { angularDiameterToWorldSize, frameRotation, galacticFrameQuaternion, inw
 import { StarData, STARS_CATALOG } from '../data/stars';
 import { DeepSpaceObjectData } from '../data/deepSpace';
 import { ConstellationData, CONSTELLATIONS } from '../data/constellations';
-import type { KeplerianElements } from '../utils/ephemeris';
+import { KeplerianElements, LY_PER_AU } from '../utils/ephemeris';
 import { selectableObjects } from './ObjectPicking';
 
 interface SelectionData {
@@ -42,6 +42,21 @@ const SKY_CAMERA_RADIUS = 0.01;
 const MILLISECONDS_PER_DAY = 86_400_000;
 const MIN_SIMULATION_TIME = Date.parse('0001-01-01T00:00:00Z');
 const MAX_SIMULATION_TIME = Date.parse('9999-12-31T23:59:59.999Z');
+const EYE_EXPOSURE = 0.82;
+const ENHANCED_EXPOSURE = 1.55;
+
+function foregroundCoverage(camera: THREE.PerspectiveCamera, position: THREE.Vector3, radius: number) {
+  if (radius <= 0) return 0;
+  const viewPosition = position.clone().applyMatrix4(camera.matrixWorldInverse);
+  const depth = -viewPosition.z;
+  if (depth <= camera.near || depth >= camera.far || viewPosition.lengthSq() <= radius ** 2) return 0;
+  const halfHeight = depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const halfWidth = halfHeight * camera.aspect;
+  // Fade the response as the apparent disc enters or leaves the viewport.
+  const horizontal = 1 - THREE.MathUtils.smoothstep(Math.abs(viewPosition.x) - halfWidth, -radius, radius);
+  const vertical = 1 - THREE.MathUtils.smoothstep(Math.abs(viewPosition.y) - halfHeight, -radius, radius);
+  return horizontal * vertical * Math.min(1, radius ** 2 / (halfWidth * halfHeight));
+}
 
 export class SpaceEngine {
   public scene: THREE.Scene;
@@ -59,6 +74,7 @@ export class SpaceEngine {
   public viewMode: ViewMode = 'linear';
   public planeAlignment: PlaneAlignment = 'ecliptic';
   public observationMode: 'darkAdaptedEye' | 'enhancedOptical' = 'darkAdaptedEye';
+  private eyeGain = 1;
   public spectralFilter = 'ALL';
   public focusedPlanetId: string | null = null;
   public activePreset: CameraPreset | null = 'sol_center';
@@ -265,14 +281,43 @@ export class SpaceEngine {
   }
 
   public setObservationMode(mode: 'darkAdaptedEye' | 'enhancedOptical') {
+    if (mode !== this.observationMode) this.eyeGain = 1;
     this.observationMode = mode;
-    const exposure = mode === 'enhancedOptical' ? 1.55 : 0.82;
-    this.renderer.toneMappingExposure = exposure;
+    this.renderer.toneMappingExposure = mode === 'enhancedOptical' ? ENHANCED_EXPOSURE : EYE_EXPOSURE * this.eyeGain;
     this.deepSpaceRenderer.setExposure(mode === 'enhancedOptical' ? 1.45 : 0.72);
     this.milkyWay.setObservationMode(mode);
     this.starField.setObservationMode(mode);
     this.starRenderer.setObservationMode(mode);
     this.onStateChange?.();
+  }
+
+  private updateEyeAdaptation(deltaSeconds: number) {
+    if (this.observationMode !== 'darkAdaptedEye' || deltaSeconds <= 0) return;
+    const camera = this.camera;
+    camera.updateMatrixWorld();
+    const position = new THREE.Vector3();
+    let glare = 120 * foregroundCoverage(camera, position, this.starRenderer.visibleSunRadius);
+
+    if (this.solSystemRenderer.group.visible) {
+      const towardObserver = new THREE.Vector3();
+      const towardSun = new THREE.Vector3();
+      for (const { mesh } of this.solSystemRenderer.planetsMap.values()) {
+        if (!mesh.visible) continue;
+        mesh.getWorldPosition(position);
+        const coverage = foregroundCoverage(camera, position, mesh.userData.displayRadius);
+        if (coverage === 0) continue;
+        towardObserver.subVectors(camera.position, position).normalize();
+        towardSun.copy(position).normalize().negate();
+        const litFraction = (1 + towardObserver.dot(towardSun)) * 0.5;
+        const solarDistance = position.length() / LY_PER_AU;
+        glare += 6 * coverage * (0.04 + 0.96 * litFraction) / Math.max(0.5, solarDistance ** 2);
+      }
+    }
+
+    const targetGain = Math.max(0.20, 1 / (1 + glare));
+    const responseSeconds = targetGain < this.eyeGain ? 0.35 : 3.0;
+    this.eyeGain = THREE.MathUtils.damp(this.eyeGain, targetGain, 1 / responseSeconds, deltaSeconds);
+    this.renderer.toneMappingExposure = EYE_EXPOSURE * this.eyeGain;
   }
 
   public async setMilkyWayMode(mode: MilkyWayMode) {
@@ -803,6 +848,7 @@ export class SpaceEngine {
     this.milkyWay.update(this.renderer, this.camera, this.viewMode);
 
     this.starRenderer.animate(this.camera);
+    this.updateEyeAdaptation(deltaSeconds);
     this.constellationRenderer.animate(elapsedTime);
     this.solSystemRenderer.animate(elapsedTime);
     this.deepSpaceRenderer.animate(elapsedTime, this.camera, this.viewMode);
