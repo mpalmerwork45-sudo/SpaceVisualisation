@@ -5,6 +5,7 @@ import { equatorialToCartesian, equatorialToEcliptic, frameRotation, inwardViewD
 import { LY_PER_AU } from '../utils/ephemeris';
 import { StarRenderer } from './StarRenderer';
 import { SolSystemRenderer } from './SolSystemRenderer';
+import { DeepSpaceRenderer } from './DeepSpaceRenderer';
 import { ConstellationRenderer } from './ConstellationRenderer';
 import { STARS_CATALOG } from '../data/stars';
 
@@ -115,6 +116,37 @@ describe('Solar System opening/reset preset', () => {
 });
 
 describe('frame and catalogue state regressions', () => {
+  it('frames a compact nebula and an extended galaxy on the shorter viewport axis', () => {
+    const engine = cameraHarness();
+    engine.deepSpaceRenderer = new DeepSpaceRenderer();
+    for (const mode of ['linear', 'logarithmic', 'realistic'] as const) {
+      engine.viewMode = mode;
+      engine.deepSpaceRenderer.updateDeepSpace(mode, 'ecliptic');
+      for (const aspect of [1.6, 0.46]) {
+        engine.camera.aspect = aspect;
+        engine.camera.updateProjectionMatrix();
+        for (const id of ['m57_ring_nebula', 'andromeda_m31']) {
+          const node = engine.deepSpaceRenderer.objectsMap.get(id)!;
+          engine.focusObject('deepSpace', id);
+          engine.cameraTarget.copy(engine.targetCameraTarget);
+          engine.cameraRadius = engine.targetCameraRadius;
+          engine.cameraFov = engine.targetCameraFov;
+          engine.cameraPhi = engine.targetCameraPhi;
+          engine.cameraTheta = engine.targetCameraTheta;
+          engine.updateCameraPosition();
+          engine.camera.updateMatrixWorld();
+          expect(engine.camera.getWorldDirection(new THREE.Vector3()).angleTo(node.position)).toBeLessThan(1e-6);
+          const axis = new THREE.Vector3(node.mesh.scale.x, 0, 0).applyQuaternion(node.mesh.quaternion);
+          const edge = node.position.clone().add(axis).project(engine.camera);
+          const fraction = Math.hypot(edge.x * aspect, edge.y) / Math.min(1, aspect);
+          expect(fraction).toBeGreaterThan(0.4);
+          expect(fraction).toBeLessThan(0.85);
+        }
+      }
+    }
+    engine.deepSpaceRenderer.dispose();
+  });
+
   it('transforms current and gliding camera anchors, orbit offsets, heading and roll together', () => {
     const engine = cameraHarness();
     engine.cameraRoll = 0.35;

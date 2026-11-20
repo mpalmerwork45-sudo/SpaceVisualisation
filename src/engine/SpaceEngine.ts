@@ -39,6 +39,7 @@ const MIN_CAMERA_RADIUS = 0.0000000001;
 const MAX_CAMERA_RADIUS = 2500000;
 const SOL_CAMERA_RADIUS = 0.0003; // ~19 AU: close view of the planetary system.
 const SKY_CAMERA_RADIUS = 0.01;
+const INSPECTION_FOV = 55;
 const MILLISECONDS_PER_DAY = 86_400_000;
 const MIN_SIMULATION_TIME = Date.parse('0001-01-01T00:00:00Z');
 const MAX_SIMULATION_TIME = Date.parse('9999-12-31T23:59:59.999Z');
@@ -492,7 +493,14 @@ export class SpaceEngine {
     this.skyLookDirection = null;
     this.targetCameraTarget.copy(targetPos);
     this.targetCameraRadius = THREE.MathUtils.clamp(focusRadius, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
-    this.targetCameraFov = 55;
+    this.targetCameraFov = INSPECTION_FOV;
+  }
+
+  /** Fit the silhouette of a bounding sphere into the shorter viewport dimension. */
+  private inspectionDistance(radius: number, fraction: number) {
+    const halfHeight = Math.tan(THREE.MathUtils.degToRad(INSPECTION_FOV / 2));
+    const halfAngle = Math.atan(halfHeight * Math.min(1, this.camera.aspect) * fraction);
+    return radius / Math.sin(halfAngle);
   }
 
   public focusPlanet(id: string) {
@@ -513,9 +521,6 @@ export class SpaceEngine {
     const selection = this.resolveSelection(type, id);
     if (!selection) return;
     this.frameObject(selection);
-    if (this.viewMode !== 'realistic' && selection.type === 'deepSpace' && selection.data.galaxy) {
-      this.setTargetViewDirection(selection.position);
-    }
     this.onStateChange?.();
   }
 
@@ -527,13 +532,15 @@ export class SpaceEngine {
 
     const angularSize = type === 'deepSpace' ? data.galaxy?.majorArcmin ?? data.angularSizeArcmin : 0;
     if (this.viewMode === 'realistic') {
-      const fov = type === 'deepSpace' ? angularSize * 1.8 / 60 : type === 'constellation' ? 35 : 12;
+      const fov = type === 'deepSpace' ? this.skyObjectFov(angularSize) : type === 'constellation' ? 35 : 12;
       this.aimSky(position, fov);
       return;
     }
     if (type === 'planet') {
       const planet = this.solSystemRenderer.planetsMap.get(data.id)!;
-      this.aimOrbit(position, planet.mesh.userData.displayRadius * (data.id === 'saturn' ? 12 : 7));
+      // Ring geometry is expressed in equatorial planet radii.
+      const outerRadius = planet.rings?.geometry.parameters.outerRadius ?? 1;
+      this.aimOrbit(position, this.inspectionDistance(planet.mesh.userData.displayRadius * outerRadius, 0.53));
       // View the sunlit side from slightly above the orbital plane.
       const direction = position.clone().normalize().add(new THREE.Vector3(0, -0.4, -0.25));
       this.setTargetViewDirection(direction);
@@ -543,13 +550,14 @@ export class SpaceEngine {
       return;
     }
 
-    let radius = Math.max(type === 'constellation' ? 15 : 10, position.length() * 0.5);
     if (type === 'deepSpace') {
-      const diameter = angularDiameterToWorldSize(angularSize, Math.max(position.length(), 0.001));
-      if (this.viewMode === 'logarithmic') radius = Math.max(2, diameter * 1.4);
-      else radius = data.galaxy ? Math.max(20, data.galaxy.physicalDiameterLy * 0.8) : Math.max(0.5, diameter * 1.4);
+      const diameter = this.viewMode === 'linear' && data.galaxy
+        ? data.galaxy.physicalDiameterLy : angularDiameterToWorldSize(angularSize, position.length());
+      this.aimOrbit(position, this.inspectionDistance(diameter / 2, 0.78));
+      this.setTargetViewDirection(position);
+      return;
     }
-    this.aimOrbit(position, radius);
+    this.aimOrbit(position, Math.max(type === 'constellation' ? 15 : 10, position.length() * 0.5));
   }
 
   private clearFocus() {
@@ -577,7 +585,13 @@ export class SpaceEngine {
 
   /** Focus an extended catalogue object at a useful multiple of its angular size. */
   public focusSkyObject(targetPos: THREE.Vector3, angularSizeArcmin: number = 60) {
-    this.focusSkyDirection(targetPos, (angularSizeArcmin / 60) * 1.8);
+    this.focusSkyDirection(targetPos, this.skyObjectFov(angularSizeArcmin));
+  }
+
+  private skyObjectFov(angularSizeArcmin: number) {
+    const halfAngle = THREE.MathUtils.degToRad(angularSizeArcmin / 120);
+    const tanHalfFov = Math.tan(halfAngle) / (0.72 * Math.min(1, this.camera.aspect));
+    return 2 * THREE.MathUtils.radToDeg(Math.atan(tanHalfFov));
   }
 
   private applyTargetCameraPose() {
