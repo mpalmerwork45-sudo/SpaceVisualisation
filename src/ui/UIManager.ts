@@ -160,6 +160,13 @@ export class UIManager {
             <button id="btn-sky-source" class="btn-icon" title="Switch between the 3D survey-based Milky Way and the ESO sky photograph" aria-pressed="false">
               Galaxy: Render
             </button>
+            <details class="galaxy-sources">
+              <summary>Galaxy data</summary>
+              <p>Milky Way dust from <a href="https://zenodo.org/records/10658339" target="_blank" rel="noopener noreferrer">Edenhofer et al.</a>
+                (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a>), resampled in 3D.</p>
+              <p>Spiral arms from <a href="https://arxiv.org/abs/1910.03357" target="_blank" rel="noopener noreferrer">Reid et al.</a></p>
+              <p>Andromeda dust from <a href="https://www.astro.princeton.edu/~draine/m31dust/m31dust.html" target="_blank" rel="noopener noreferrer">Draine et al.</a></p>
+            </details>
           </div>
         </div>
         </details>
