@@ -79,10 +79,11 @@ physical sky: compressed map coordinates are not treated as real distances.
 The local Great Rift/Ophiuchus/Coalsack approximation occupies a finite shell
 around Sol, with angular structure evaluated at the ray's two shell crossings.
 This is an inexpensive foreground approximation, not measured cloud geometry.
-The 100,000 deterministic synthetic stars have separate bulge, disc and
-isotropic populations, with dimmer, less colourful output in eye mode.
-The synthetic star shell still uses Solar-vantage extinction and is not a 3D
-stellar catalogue; its parallax is not physically accurate away from Sol.
+The 100,000 deterministic synthetic stars have finite depths and separate
+bulge, disc and isotropic populations. Physical navigation changes their
+directions by parallax, scales their brightness with distance, and tests for
+dust between the observer and each star. The angular and logarithmic
+maps use Sol’s sightlines. These are procedurally placed stars.
 
 The model is informed by the broad anatomy described by
 [ESA](https://www.esa.int/ESA_Multimedia/Images/2016/09/Anatomy_of_the_Milky_Way)

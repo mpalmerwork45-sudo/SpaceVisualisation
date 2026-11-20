@@ -62,7 +62,7 @@ try {
     window.draw = () => {
       snap();
       engine.milkyWay.mesh.position.copy(engine.camera.position);
-      engine.starField.points.position.copy(engine.camera.position);
+      engine.starField.update(engine.camera, engine.viewMode);
       engine.milkyWay.update(engine.renderer,engine.camera,engine.viewMode);
       engine.renderer.render(engine.scene,engine.camera);
     };
@@ -374,6 +374,48 @@ try {
     document.getElementById('navigation-options').open = false;
     click('btn-close-modal'); click('btn-view-sol'); snap();
     return { januaryDistance, julyDistance };
+  });
+
+  results.parallax = await page.evaluate(async () => {
+    const { StarFieldBackground } = await import('/src/engine/StarFieldBackground.ts');
+    const renderer = engine.renderer;
+    const field = new StarFieldBackground(1);
+    field.setPlaneAlignment('galactic');
+    field.setObservationMode('enhancedOptical');
+    field.points.geometry.getAttribute('position').setXYZ(0, 1000, 0, 0);
+    field.points.geometry.getAttribute('color').setXYZ(0, 1, 1, 1);
+    field.points.geometry.getAttribute('size').setX(0, 3);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0);
+    scene.add(field.points);
+    const camera = new THREE.PerspectiveCamera(55, engine.camera.aspect, engine.camera.near, engine.camera.far);
+    const gl = renderer.getContext();
+    const width = gl.drawingBufferWidth, height = gl.drawingBufferHeight;
+    const scanline = new Uint8Array(width * 4);
+    const capture = (offset, mode) => {
+      camera.position.set(0, 0, offset);
+      camera.lookAt(1, 0, offset);
+      field.update(camera, mode);
+      renderer.render(scene, camera);
+      gl.readPixels(0, Math.floor(height / 2), width, 1, gl.RGBA, gl.UNSIGNED_BYTE, scanline);
+      let total = 0, weighted = 0;
+      for (let x = 0; x < width; x++) {
+        const intensity = scanline[4 * x];
+        weighted += x * intensity;
+        total += intensity;
+      }
+      return weighted / total;
+    };
+    try {
+      const sol = capture(0, 'linear');
+      const offset = capture(180, 'linear');
+      const log = capture(180, 'logarithmic');
+      check(offset < sol - 50, 'translated observers see parallax in the rendered background stars');
+      check(Math.abs(log - sol) < 1, 'logarithmic views preserve the synthetic sightline from Sol');
+      return { sol, offset, log };
+    } finally {
+      field.dispose();
+    }
   });
 
   results.context = await page.evaluate(async () => {

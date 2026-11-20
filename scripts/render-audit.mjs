@@ -81,7 +81,7 @@ try {
     window.auditDraw = () => {
       e.camera.updateMatrixWorld();
       e.milkyWay.mesh.position.copy(e.camera.position);
-      e.starField.points.position.copy(e.camera.position);
+      e.starField.update(e.camera, e.viewMode);
       e.milkyWay.update?.(e.renderer, e.camera, e.viewMode);
       e.deepSpaceRenderer.animate(0, e.camera, e.viewMode);
       e.renderer.render(e.scene, e.camera);
