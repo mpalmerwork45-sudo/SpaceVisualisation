@@ -7,6 +7,11 @@ export const DUST_GRID = {
 } as const;
 export const DUST_WIDTH = 2 * DUST_GRID.longitude;
 export const DUST_HEIGHT = 2 * DUST_GRID.latitude;
+export const DUST_CLOUDS = {
+  width: 128, height: 96,
+  regions: [{ lon: 288, lat: -12 }, { lon: 64, lat: -8 }],
+  longitudeSpan: 28, latitudeSpan: 20
+} as const;
 export const DUST_LOG_RANGE = Math.log(DUST_GRID.farKpc / DUST_GRID.nearKpc);
 const taperWidthBins = 2;
 export const DUST_INNER_END = DUST_GRID.nearKpc * Math.exp(taperWidthBins * DUST_LOG_RANGE / DUST_GRID.radius);
@@ -19,6 +24,34 @@ function rampIntegral(radius: number, lo: number, hi: number) {
 
 export function coveredRadialDistance(r: number) {
   return rampIntegral(r, DUST_GRID.nearKpc, DUST_INNER_END) - rampIntegral(r, DUST_OUTER_START, DUST_GRID.farKpc);
+}
+
+const decoded = Float64Array.from({ length: 256 }, (_, i) => 0.125 * (2 ** (12 * i / 255) - 1));
+
+/** Independently measured Coalsack and Cygnus samples already resolve small filaments.
+ * Both channels follow the all-sky texture contract at each shell's outer edge. */
+export function prepareLocalClouds(source: Uint8Array) {
+  const area = DUST_CLOUDS.width * DUST_CLOUDS.height;
+  const shells = DUST_GRID.radius;
+  if (source.length !== area * shells * DUST_CLOUDS.regions.length) throw new Error('Unexpected dust cloud data length');
+  const output = new Uint16Array(2 * source.length);
+  for (let region = 0; region < DUST_CLOUDS.regions.length; region++) {
+    const column = new Float64Array(area);
+    let previous = 0;
+    for (let shell = 0; shell < shells; shell++) {
+      const covered = coveredRadialDistance(DUST_GRID.nearKpc * Math.exp((shell + 1) * DUST_LOG_RANGE / shells));
+      const length = covered - previous;
+      const plane = (region * shells + shell) * area;
+      for (let i = 0; i < area; i++) {
+        const density = decoded[source[plane + i]];
+        column[i] += density * length;
+        output[2 * (plane + i)] = DataUtils.toHalfFloat(density);
+        output[2 * (plane + i) + 1] = DataUtils.toHalfFloat(column[i]);
+      }
+      previous = covered;
+    }
+  }
+  return output;
 }
 
 // A monotonically limited slope reconstructs gradients without overshoot into empty cells.
@@ -43,7 +76,6 @@ export function prepareLocalDust(source: Uint8Array) {
   const area = DUST_WIDTH * DUST_HEIGHT;
   const output = new Uint16Array(area * nz * 2);
   const column = new Float32Array(area);
-  const decoded = Float64Array.from({ length: 256 }, (_, i) => 0.125 * (2 ** (12 * i / 255) - 1));
   const directions = new Float32Array(3 * area);
   const angles = new Float64Array(DUST_HEIGHT);
   const fine = new Float64Array(4);

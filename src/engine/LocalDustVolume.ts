@@ -1,14 +1,16 @@
 import * as THREE from 'three';
 import {
-  DUST_GRID, DUST_HEIGHT, DUST_INNER_END, DUST_LOG_RANGE, DUST_OUTER_START, DUST_WIDTH
+  DUST_CLOUDS, DUST_GRID, DUST_HEIGHT, DUST_INNER_END, DUST_LOG_RANGE, DUST_OUTER_START, DUST_WIDTH
 } from './LocalDustGrid';
 
 export function localDustUniforms() {
-  return { uLocalDust: { value: null as THREE.DataArrayTexture | null }, uSurveyReady: { value: false } };
+  return {
+    uLocalDust: { value: null as THREE.DataArrayTexture | null }, uSurveyReady: { value: false },
+    uLocalDustClouds: { value: null as THREE.DataArrayTexture | null }, uCloudsReady: { value: false }
+  };
 }
 
-/** One survey texture is shared by both background layers. Measured densities
- * are decoded in a worker so map preparation never blocks the first frame. */
+/** The diffuse sky and finite-distance stars share both resolved extinction volumes. */
 export class LocalDustVolume {
   public readonly uniforms = localDustUniforms();
   private pending?: Promise<boolean>;
@@ -16,16 +18,27 @@ export class LocalDustVolume {
 
   public load(): Promise<boolean> {
     if (this.abort.signal.aborted) return Promise.resolve(false);
-    if (this.uniforms.uSurveyReady.value) return Promise.resolve(true);
-    return this.pending ??= this.loadTexture().catch(error => {
-      if (!this.abort.signal.aborted) console.warn('Local dust map unavailable; using the analytic sky.', error);
-      return false;
-    }).finally(() => { this.pending = undefined; });
+    if (this.uniforms.uCloudsReady.value) return Promise.resolve(true);
+    return this.pending ??= this.loadSurveys().finally(() => { this.pending = undefined; });
   }
 
-  private async loadTexture() {
-    const url = import.meta.env.BASE_URL + 'data/local-dust-edenhofer.bin';
+  private async loadSurveys() {
+    try {
+      if (!this.uniforms.uSurveyReady.value) {
+        await this.loadTexture(false);
+      }
+      await this.loadTexture(true);
+    } catch (error) {
+      if (!this.abort.signal.aborted) console.warn('Could not load a Galactic dust survey.', error);
+    }
+    return this.uniforms.uSurveyReady.value;
+  }
+
+  private async loadTexture(clouds: boolean) {
+    const file = clouds ? 'local-dust-clouds.bin' : 'local-dust-edenhofer.bin';
+    const url = import.meta.env.BASE_URL + 'data/' + file;
     const signal = this.abort.signal;
+    signal.throwIfAborted();
     const response = await fetch(url, { signal });
     if (!response.ok) throw new Error(`Dust data request failed (${response.status})`);
     const packed = await response.arrayBuffer();
@@ -38,20 +51,26 @@ export class LocalDustVolume {
         signal.addEventListener('abort', rejectAborted, { once: true });
         worker.onmessage = (event: MessageEvent<ArrayBuffer>) => resolve(new Uint16Array(event.data));
         worker.onerror = event => reject(new Error(event.message));
-        worker.postMessage(packed, [packed]);
+        worker.postMessage({ packed, clouds }, [packed]);
       });
       signal.throwIfAborted();
       // Array layers support the refined 512-wide footprint on WebGL 2 devices
       // with a 256-texel limit for 3D textures. Each layer is one radial bin.
-      const texture = new THREE.DataArrayTexture(grid, DUST_WIDTH, DUST_HEIGHT, DUST_GRID.radius);
+      const texture = new THREE.DataArrayTexture(grid, clouds ? DUST_CLOUDS.width : DUST_WIDTH,
+        clouds ? DUST_CLOUDS.height : DUST_HEIGHT, DUST_GRID.radius * (clouds ? DUST_CLOUDS.regions.length : 1));
       texture.format = THREE.RGFormat;
       texture.type = THREE.HalfFloatType;
-      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapS = clouds ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
       texture.minFilter = texture.magFilter = THREE.LinearFilter;
       texture.needsUpdate = true;
-      this.uniforms.uLocalDust.value = texture;
-      this.uniforms.uSurveyReady.value = true;
-      return true;
+      const { uLocalDustClouds, uCloudsReady, uLocalDust, uSurveyReady } = this.uniforms;
+      if (clouds) {
+        uLocalDustClouds.value = texture;
+        uCloudsReady.value = true;
+      } else {
+        uLocalDust.value = texture;
+        uSurveyReady.value = true;
+      }
     } finally {
       signal.removeEventListener('abort', rejectAborted);
       worker.terminate();
@@ -63,13 +82,25 @@ export class LocalDustVolume {
     this.uniforms.uLocalDust.value?.dispose();
     this.uniforms.uLocalDust.value = null;
     this.uniforms.uSurveyReady.value = false;
+    this.uniforms.uLocalDustClouds.value?.dispose();
+    this.uniforms.uLocalDustClouds.value = null;
+    this.uniforms.uCloudsReady.value = false;
   }
+}
+
+// Unit vectors of cones enclosing each survey footprint, for march sampling.
+function cloudDirection(region: typeof DUST_CLOUDS.regions[number]) {
+  const lon = THREE.MathUtils.degToRad(region.lon + DUST_CLOUDS.longitudeSpan / 2);
+  const lat = THREE.MathUtils.degToRad(region.lat + DUST_CLOUDS.latitudeSpan / 2);
+  return `vec3(${Math.cos(lon)*Math.cos(lat)}, ${Math.sin(lat)}, ${-Math.sin(lon)*Math.cos(lat)})`;
 }
 
 /** Physical origin and all integration distances are heliocentric Galactic kpc. */
 export const LOCAL_DUST_GLSL = /* glsl */ `
   uniform highp sampler2DArray uLocalDust;
   uniform bool uSurveyReady;
+  uniform highp sampler2DArray uLocalDustClouds;
+  uniform bool uCloudsReady;
   const float dustNear = ${DUST_GRID.nearKpc};
   const float dustFar = ${DUST_GRID.farKpc};
   const float dustInnerEnd = ${DUST_INNER_END};
@@ -81,6 +112,26 @@ export const LOCAL_DUST_GLSL = /* glsl */ `
     float latitude = asin(clamp(p.y / max(length(p), 1e-12), -1.0, 1.0));
     float longitude = dot(p.xz,p.xz) > 0.0 ? atan(-p.z,p.x) : 0.0;
     return vec2(longitude / 6.28318530718, latitude / 3.14159265359 + 0.5);
+  }
+  // Interpolate both differential density and the cumulative column with the
+  // same angular weight, so finite source distances stay continuous at seams.
+  vec2 surveySamples(vec2 uv, float bin) {
+    if (uCloudsReady) {
+      vec2 lb = vec2(fract(uv.x)*360.0, (uv.y - 0.5)*180.0);
+      bool coalsack = lb.x > 180.0;
+      vec2 origin = coalsack ? vec2(${DUST_CLOUDS.regions[0].lon}.0,${DUST_CLOUDS.regions[0].lat}.0)
+                             : vec2(${DUST_CLOUDS.regions[1].lon}.0,${DUST_CLOUDS.regions[1].lat}.0);
+      vec2 span = vec2(${DUST_CLOUDS.longitudeSpan}.0, ${DUST_CLOUDS.latitudeSpan}.0);
+      vec2 offset = lb - origin;
+      vec2 edges = min(offset, span - offset);
+      float weight = smoothstep(0.0, 1.4, min(edges.x, edges.y));
+      if (weight > 0.0) {
+        vec2 cloud = textureLod(uLocalDustClouds,vec3(offset/span,bin + (coalsack ? 0.0 : dustBins)),0.0).rg;
+        if (weight >= 1.0) return cloud;
+        return mix(textureLod(uLocalDust,vec3(uv,bin),0.0).rg, cloud, weight);
+      }
+    }
+    return textureLod(uLocalDust,vec3(uv,bin),0.0).rg;
   }
   float dustRampIntegral(float r, float lo, float hi) {
     float t = clamp((r-lo)/(hi-lo), 0.0, 1.0);
@@ -96,7 +147,7 @@ export const LOCAL_DUST_GLSL = /* glsl */ `
     r = min(r,dustFar);
     float bin = min(floor(log(r/dustNear)/dustLogRange*dustBins),dustBins-1.0);
     float farEdge = dustNear*exp((bin+1.0)/dustBins*dustLogRange);
-    vec2 densities = textureLod(uLocalDust,vec3(uv,bin),0.0).rg;
+    vec2 densities = surveySamples(uv,bin);
     return max(0.0,densities.g - densities.r*(coveredDistance(farEdge)-coveredDistance(r)));
   }
 
@@ -113,15 +164,22 @@ export const LOCAL_DUST_GLSL = /* glsl */ `
     if (hi <= lo) return vec2(0.0);
     // A nearly tangential ray can sweep many angular texels inside one radial layer.
     float angle = impact > 0.000001 ? atan((hi-lo)*impact,impact*impact+lo*hi) : 0.0;
-    int count = int(clamp(ceil(angle*40.0),1.0,24.0));
+    float samplesPerRadian = 40.0;
+    if (uCloudsReady && angle > 0.004) {
+      vec3 midDir = normalize(closest + ray * (0.5*(lo+hi)));
+      float cone = cos(min(3.14159, radians(18.0) + angle));
+      if (max(dot(midDir,${cloudDirection(DUST_CLOUDS.regions[0])}),
+              dot(midDir,${cloudDirection(DUST_CLOUDS.regions[1])})) >= cone) samplesPerRadian = 250.0;
+    }
+    int count = int(clamp(ceil(angle*samplesPerRadian),1.0,80.0));
     float ds = (hi-lo)/float(count);
     vec2 measured = vec2(0.0);
-    for (int j=0; j<24; j++) {
+    for (int j=0; j<80; j++) {
       if (j>=count) break;
       vec3 p = closest + ray*(lo+(float(j)+0.5)*ds);
       float r = length(p);
       float weight = smoothstep(dustNear,dustInnerEnd,r)*(1.0-smoothstep(dustOuterStart,dustFar,r));
-      float density = textureLod(uLocalDust,vec3(dustUV(p),layer),0.0).r;
+      float density = surveySamples(dustUV(p),layer).r;
       measured += weight*ds*vec2(density,1.0);
     }
     return measured;

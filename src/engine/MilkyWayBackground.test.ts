@@ -31,6 +31,9 @@ describe('procedural radiance pass', () => {
     dust.uniforms.uSurveyReady.value = true;
     draw(); draw();
     expect(renderer.render).toHaveBeenCalledTimes(2);
+    dust.uniforms.uCloudsReady.value = true;
+    draw(); draw();
+    expect(renderer.render).toHaveBeenCalledTimes(3);
     sky.dispose(); target.dispose(); dust.dispose();
   });
   it('reintegrates an unchanged view after WebGL context restoration', () => {

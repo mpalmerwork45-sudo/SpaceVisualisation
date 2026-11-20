@@ -35,6 +35,7 @@ export class MilkyWayBackground {
 
   private readonly armTexture = createGalacticArmTexture(GALACTIC_CENTRE_KPC);
   private surveyReady = false;
+  private cloudsReady = false;
 
   constructor(localDust?: LocalDustVolume) {
     this.texture = new THREE.Texture();
@@ -141,7 +142,8 @@ export class MilkyWayBackground {
     if (viewMode !== 'linear') observer.set(0, 0, 0);
     camera.updateMatrixWorld();
     const ready = this.integrationMaterial.uniforms.uSurveyReady.value as boolean;
-    if (!this.dirty && this.surveyReady === ready && this.lastView.equals(camera.matrixWorld) &&
+    const cloudsReady = this.integrationMaterial.uniforms.uCloudsReady.value as boolean;
+    if (!this.dirty && this.surveyReady === ready && this.cloudsReady === cloudsReady && this.lastView.equals(camera.matrixWorld) &&
         this.lastProjection.equals(camera.projectionMatrix) && this.lastObserver.equals(observer)) return;
 
     this.integrationMesh.position.copy(camera.position);
@@ -156,6 +158,7 @@ export class MilkyWayBackground {
       renderer.autoClear = previousAutoClear;
     }
     this.surveyReady = ready;
+    this.cloudsReady = cloudsReady;
     this.lastView.copy(camera.matrixWorld);
     this.lastProjection.copy(camera.projectionMatrix);
     this.lastObserver.copy(observer);
