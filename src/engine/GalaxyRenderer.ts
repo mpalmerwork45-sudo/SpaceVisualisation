@@ -7,6 +7,7 @@ import { DeepSpaceObjectData, GalaxyAppearance } from '../data/deepSpace';
 import { meanSurfaceBrightnessMagArcsec2, surfaceBrightnessFlux } from '../utils/photometry';
 import type { PlaneAlignment } from './StarRenderer';
 import { RADIATIVE_TRANSFER_GLSL } from './RadiativeTransfer';
+import { createGalaxyDisc } from './GalaxyDisc';
 
 export interface RenderedGalaxyNode {
   data: DeepSpaceObjectData;
@@ -33,40 +34,24 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
   uniform float uDepthRatio;
   uniform float uBulgeFraction;
   uniform float uSersicIndex;
-  uniform float uDiskScale;
-  uniform float uArmCount;
-  uniform float uPitch0;
-  uniform float uPitch1;
-  uniform float uArmContrast;
+  uniform sampler2D uDisc;
+  uniform float uDiscHeight;
   uniform float uDustOpacity;
   uniform float uPhotometricFlux;
   uniform float uExposure;
-  uniform float uSeed;
-  uniform int uMorphology;
 
   varying vec3 vLocal;
   #include <common>
   #include <logdepthbuf_pars_fragment>
   ${RADIATIVE_TRANSFER_GLSL}
 
-  float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 345.45));
-    p += dot(p, p + 34.345 + uSeed);
-    return fract(p.x * p.y);
-  }
-
-  float valueNoise(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash21(i), hash21(i+vec2(1,0)), f.x),
-               mix(hash21(i+vec2(0,1)), hash21(i+vec2(1,1)), f.x), f.y);
-  }
-
-  float armPattern(vec2 p, float pitch) {
-    float radius = max(length(p), 0.025);
-    float angle = atan(p.y, p.x);
-    float phase = angle - log(radius) / max(tan(pitch), 0.05);
-    return smoothstep(0.48, 0.92, 0.5 + 0.5 * cos(phase * max(uArmCount, 1.0)));
+  // Mean density of an exponential sheet over a ray segment. Integrating
+  // over its vertical extent keeps thin dust lanes visible at grazing angles.
+  float layerDensity(float z, float dz, float height) {
+    if (dz < 0.08 * height) return 0.5 / height * exp(-abs(z) / height);
+    vec2 ends = vec2(z - 0.5 * dz, z + 0.5 * dz);
+    vec2 cumulative = sign(ends) * (1.0 - exp(-abs(ends) / height));
+    return 0.5 * (cumulative.y - cumulative.x) / dz;
   }
 
   void main() {
@@ -90,69 +75,58 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
     float n = max(uSersicIndex, 0.60);
     float bn = 2.0*n - 1.0/3.0 + 4.0/(405.0*n) + 46.0/(25515.0*n*n);
     float bulgeScale = mix(0.10, 0.26, uBulgeFraction);
-    float discHeight = uMorphology == 3 ? 0.13 : (uMorphology == 2 ? 0.041 : 0.068);
-    float dustHeight = discHeight * 0.50;
-    bool hasArms = uMorphology == 0 || uMorphology == 1;
-    float pitch = radians(mix(uPitch0, uPitch1, 0.5 + 0.5 * sin(uSeed)));
+    vec3 stepVector = stepSize * ray;
+    vec2 firstUV = start.xy * 0.5 + 0.5;
+    vec2 stepUV = stepVector.xy * 0.5;
+    vec2 uvDx = dFdx(firstUV), uvDy = dFdy(firstUV);
+    vec2 stepDx = dFdx(stepUV), stepDy = dFdy(stepUV);
+    float dz = abs(stepVector.z) * uDepthRatio;
+    vec3 oldColour = mix(vec3(1.0, 0.76, 0.52), uPrimary, 0.28);
+    vec3 youngColour = mix(vec3(0.36, 0.61, 1.0), uSecondary, 0.20);
 
-    float transmission = 1.0;
+    vec3 transmission = vec3(1.0);
     vec3 light = vec3(0.0);
     for (int i = 0; i < steps; i++) {
-      vec3 samplePosition = start + (float(i) + 0.5) * stepSize * ray;
+      float sampleIndex = float(i) + 0.5;
+      vec3 samplePosition = start + sampleIndex * stepVector;
       vec3 p = samplePosition * scale;
-      float radius = length(p.xy);
-      float height = abs(p.z);
-      float cloud = valueNoise(p.xy * 16.0 + uSeed);
-      float fine = valueNoise(p.xy * 98.0 + uSeed);
-      float arms = hasArms ? armPattern(p.xy + (cloud - 0.5) * 0.018, pitch) : 0.0;
-      float structure = uMorphology == 3 ? 0.25 + 1.6 * cloud : 0.85 + uArmContrast * arms * (0.5 + cloud * 1.8);
-      structure *= 0.75 + fine * 0.5;
-      if (uMorphology == 1) {
-        vec2 bar = p.xy * vec2(2.4, 8.0);
-        structure += 0.8 * exp(-dot(bar, bar));
-      }
+      vec2 dx = uvDx + sampleIndex * stepDx, dy = uvDy + sampleIndex * stepDy;
+      // Filter both the projected pixel and the length of disc crossed by
+      // this step, so compact associations blend smoothly at a distance.
+      if (dot(stepUV, stepUV) > max(dot(dx, dx), dot(dy, dy))) dx = stepUV;
+      vec4 columns = textureGrad(uDisc, firstUV + sampleIndex * stepUV, dx, dy);
 
-      float envelope = 1.0 - smoothstep(0.78, 1.0, length(samplePosition));
-      float disc = exp(-radius / max(uDiskScale, 0.08)) * exp(-height / discHeight) / (2.0 * discHeight);
-      float bulgeRadius = length(p * vec3(1.0, 1.0, 1.22));
-      float bulge = exp(-bn * (pow(max(bulgeRadius / bulgeScale, 0.002), 1.0 / n) - 1.0));
-      float older = bulge * uBulgeFraction * envelope;
-      float younger = disc * structure * (1.0 - uBulgeFraction) * envelope;
-      float dust = uDustOpacity * exp(-height / dustHeight - radius / 0.42)
-        * (0.2 + cloud * 1.4 + arms * 0.35) * envelope / (2.0 * dustHeight);
-      float opticalDepth = path * (dust + 0.17 * (older + younger));
-      vec3 youngColour = mix(uPrimary, uSecondary, 0.28 + 0.48 * arms);
-      youngColour += vec3(0.17, 0.04, 0.07) * smoothstep(0.77, 0.94, fine) * arms;
-      vec3 emissivity = (uPrimary * older + youngColour * younger) * exp(-vec3(0.05, 0.15, 0.28) * dust * path);
-      light += transmission * emissivity * path * emissionIntegral(opticalDepth);
-      transmission *= exp(-opticalDepth);
-      if (transmission < 0.004) break;
+      float taper = 1.0 - smoothstep(0.52, 1.0, length(samplePosition));
+      float envelope = taper * taper;
+      float z = p.z - 0.016 * p.x * dot(p.xy, p.xy);
+      float bulgeRadius = length(p * vec3(1.0, 1.0, 1.12));
+      float bulge = 1.60 * exp(-bn * (pow(max(bulgeRadius / bulgeScale, 0.002), 1.0 / n) - 1.0));
+      float old = columns.r * layerDensity(z, dz, uDiscHeight) * 1.35;
+      float youngLayer = layerDensity(z, dz, uDiscHeight * 0.13);
+      float young = columns.g * youngLayer * 1.65;
+      float ionized = columns.a * youngLayer * 1.2;
+      float dust = uDustOpacity * columns.b * layerDensity(z, dz, uDiscHeight * 0.20) * 2.1;
+      float stars = (1.0 - uBulgeFraction) * (old + young) + uBulgeFraction * bulge;
+      vec3 emissivity = (1.0 - uBulgeFraction) * (oldColour * old + youngColour * young
+        + vec3(1.0, 0.20, 0.28) * ionized) + oldColour * uBulgeFraction * bulge;
+      vec3 tau = (vec3(0.72, 1.0, 1.32) * dust + 0.17 * stars) * envelope * path;
+      light += transmission * emissivity * envelope * path * emissionIntegral(tau);
+      transmission *= exp(-tau);
+      if (max(transmission.r, max(transmission.g, transmission.b)) < 0.004) break;
     }
 
-    float alpha = 1.0 - transmission;
-    if (alpha < 0.002) discard;
+    float alpha = 1.0 - dot(transmission, vec3(0.2126, 0.7152, 0.0722));
+    if (alpha < 0.00002) discard;
     #include <logdepthbuf_fragment>
     float luminance = dot(light, vec3(0.2126, 0.7152, 0.0722));
     light = mix(vec3(luminance), light, mix(0.06, 1.0, smoothstep(0.72, 1.45, uExposure)));
-    gl_FragColor = vec4(light * uPhotometricFlux * uExposure / max(alpha, 0.002), alpha);
+    // Radiance is already integrated along the chord. Blend it additively over
+    // the transmitted sky without letting a dense, dark lane brighten the source.
+    gl_FragColor = vec4(light * uPhotometricFlux * uExposure, alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
-    #include <premultiplied_alpha_fragment>
   }
 `;
-
-const MORPHOLOGY = {
-  spiral: 0, barredSpiral: 1, edgeOn: 2, irregular: 3, lenticular: 4
-};
-
-function stableSeed(id: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < id.length; i++) {
-    hash ^= id.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) / 4294967295;
-}
 
 function transformEquatorialVector(vector: THREE.Vector3, alignment: PlaneAlignment): THREE.Vector3 {
   if (alignment === 'galactic') return equatorialToGalactic(vector);
@@ -164,6 +138,7 @@ export class GalaxyRenderer {
   public readonly group = new THREE.Group();
   public readonly nodes = new Map<string, RenderedGalaxyNode>();
   private readonly volumeGeometry = new THREE.SphereGeometry(1, 40, 28);
+  private readonly discs = new Map<DeepSpaceObjectData, THREE.DataTexture>();
   private exposure = 0.72;
 
   public setExposure(exposure: number) {
@@ -185,6 +160,8 @@ export class GalaxyRenderer {
   public dispose() {
     this.clear();
     this.volumeGeometry.dispose();
+    for (const disc of this.discs.values()) disc.dispose();
+    this.discs.clear();
   }
 
   public createGalaxy(dso: DeepSpaceObjectData, viewMode: ViewMode, alignment: PlaneAlignment, position: THREE.Vector3): RenderedGalaxyNode {
@@ -226,11 +203,16 @@ export class GalaxyRenderer {
   }
 
   private createMaterial(dso: DeepSpaceObjectData, appearance: GalaxyAppearance, depthRatio: number) {
-    const pitches = appearance.armPitchAnglesDeg ?? [18, 22];
+    let disc = this.discs.get(dso);
+    if (!disc) {
+      disc = createGalaxyDisc(dso.id, appearance);
+      this.discs.set(dso, disc);
+    }
+    const discHeight = appearance.morphology === 'irregular' ? 0.115 : appearance.morphology === 'edgeOn' ? 0.050 : 0.075;
     const surfaceBrightness = meanSurfaceBrightnessMagArcsec2(
       appearance.apparentMagnitudeV, appearance.majorArcmin, appearance.minorArcmin
     );
-    const flux = THREE.MathUtils.clamp(0.78 * surfaceBrightnessFlux(surfaceBrightness), 0.04, 2.4);
+    const flux = THREE.MathUtils.clamp(0.44 * surfaceBrightnessFlux(surfaceBrightness), 0.04, 2.4);
     return new THREE.ShaderMaterial({
       vertexShader: GALAXY_VERTEX_SHADER,
       fragmentShader: GALAXY_FRAGMENT_SHADER,
@@ -241,16 +223,11 @@ export class GalaxyRenderer {
         uDepthRatio: { value: depthRatio },
         uBulgeFraction: { value: appearance.bulgeFraction },
         uSersicIndex: { value: appearance.sersicIndex },
-        uDiskScale: { value: appearance.diskScale },
-        uArmCount: { value: appearance.armCount ?? 1 },
-        uPitch0: { value: pitches[0] ?? 18 },
-        uPitch1: { value: pitches[1] ?? pitches[0] ?? 22 },
-        uArmContrast: { value: appearance.armContrast ?? 0 },
+        uDisc: { value: disc },
+        uDiscHeight: { value: discHeight },
         uDustOpacity: { value: appearance.dustOpacity },
         uPhotometricFlux: { value: flux },
-        uExposure: { value: this.exposure },
-        uSeed: { value: stableSeed(dso.id) * 31 },
-        uMorphology: { value: MORPHOLOGY[appearance.morphology] }
+        uExposure: { value: this.exposure }
       },
       side: THREE.BackSide, transparent: true, depthWrite: false,
       premultipliedAlpha: true, blending: THREE.NormalBlending
