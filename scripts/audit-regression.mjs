@@ -159,6 +159,32 @@ try {
     return { missDistance: miss, brownDwarfs: catalogue.filter(star => /^[LTY]/.test(star.spectral)).length };
   });
 
+  results.catalogueSearch = await page.evaluate(() => {
+    const input = document.getElementById('search-input');
+    input.value = 'Orion';
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+    const matches = [...document.querySelectorAll('.search-item')];
+    check(matches[0]?.dataset.id === 'orion' && matches[0]?.dataset.type === 'constellation', 'exact constellation name ranks ahead of regional star matches');
+    check(matches[1]?.dataset.id === 'm42_orion_nebula', 'Orion Nebula ranks alongside the constellation');
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+    const panel = document.getElementById('modal-content');
+    check(panel.textContent.includes('Stars in outline') && !panel.textContent.includes('Solar System') && !panel.textContent.includes('0 AU'),
+      'constellation details describe its outline');
+    click('btn-close-modal');
+    search('NGC 7293');
+    check(panel.querySelector('h2').textContent.includes('Helix Nebula'), 'catalogue aliases work with a space before the number');
+    click('btn-close-modal');
+
+    const earth = engine.resolveSelection('planet', 'earth');
+    engine.onHoverObject(earth, {x:200,y:200});
+    const tooltip = document.getElementById('tooltip').textContent;
+    const distanceAU = earth.position.length() * 63241.077;
+    check(/Type:\s*Planet/.test(tooltip) && tooltip.includes(distanceAU.toFixed(2) + ' AU'), 'planet hover identifies Earth and reports its computed heliocentric distance');
+    engine.onHoverObject(null, {x:0,y:0});
+    return { firstOrionResults: matches.slice(0,2).map(match => match.dataset.id) };
+  });
+
   results.sky = await page.evaluate(() => {
     click('btn-mode-real'); snap();
     check(!engine.starRenderer.starsMap.has('sol'),'3: observer Sun is not placed on the angular sky');

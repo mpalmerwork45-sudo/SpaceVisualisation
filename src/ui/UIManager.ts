@@ -1,16 +1,22 @@
-import { SpaceEngine, ObjectSelection } from '../engine/SpaceEngine';
-import { STARS_CATALOG } from '../data/stars';
-import { PLANET_EPHEMERIS } from '../utils/ephemeris';
-import { DEEP_SPACE_OBJECTS } from '../data/deepSpace';
+import { SpaceEngine, ObjectSelection, SelectedObjectType } from '../engine/SpaceEngine';
+import { PLANET_EPHEMERIS, LY_PER_AU } from '../utils/ephemeris';
 import { getSpectralCssColor } from '../utils/coordinates';
 import { AudioEngine } from './AudioEngine';
 import { StarLabelOverlay } from './StarLabelOverlay';
 import { ConstellationLabelOverlay } from './ConstellationLabelOverlay';
 import { PlanetLabelOverlay } from './PlanetLabelOverlay';
 import { PLANET_APPEARANCE } from '../data/planetAppearance';
-import { LY_PER_AU } from '../utils/ephemeris';
 import { Vector3 } from 'three';
 import { matchesSpectralFilter } from '../engine/StarRenderer';
+import { DEEP_SPACE_LABELS, planetKind, searchCatalogue } from './catalogueSearch';
+
+function planetDistance(position: Vector3) {
+  return `${(position.length() / LY_PER_AU).toFixed(2)} AU`;
+}
+
+function stat(label: string, value: string | number) {
+  return `<div class="stat-box"><span class="stat-label">${label}</span><span class="stat-value">${value}</span></div>`;
+}
 
 export class UIManager {
   private engine: SpaceEngine;
@@ -36,7 +42,7 @@ export class UIManager {
     const labelsContainer = document.getElementById('labels-container')!;
     this.labelOverlay = new StarLabelOverlay(engine, labelsContainer);
     this.constellationLabelOverlay = new ConstellationLabelOverlay(engine, labelsContainer);
-    this.planetLabelOverlay = new PlanetLabelOverlay(engine, labelsContainer, id => this.selectAndFlyToObject(id));
+    this.planetLabelOverlay = new PlanetLabelOverlay(engine, labelsContainer, id => this.selectAndFocus('planet', id));
 
     this.bindEngineCallbacks();
     this.engine.onStateChange = () => this.syncEngineControls();
@@ -151,7 +157,7 @@ export class UIManager {
       <div class="search-container">
         <div class="search-box">
           <span class="search-icon">🔍</span>
-          <input type="text" id="search-input" placeholder="Search stars, brown dwarfs, planets, nebulae... [Press /]" autocomplete="off" />
+          <input type="text" id="search-input" aria-label="Search celestial objects" placeholder="Search stars, planets, nebulae, constellations… [/]" autocomplete="off" />
           <div id="search-results" class="search-results hidden"></div>
         </div>
       </div>
@@ -220,8 +226,8 @@ export class UIManager {
       <div id="tooltip" class="tooltip hidden"></div>
 
       <!-- OBJECT DETAIL SIDEBAR / MODAL -->
-      <div id="detail-modal" class="detail-modal hidden">
-        <button id="btn-close-modal" class="btn-close">&times;</button>
+      <div id="detail-modal" class="detail-modal hidden" role="region" aria-label="Object details">
+        <button id="btn-close-modal" class="btn-close" aria-label="Close object details">&times;</button>
         <div id="modal-content"></div>
       </div>
     `;
@@ -383,11 +389,14 @@ export class UIManager {
       if (document.activeElement === this.searchInput) {
         if (e.key === 'Enter') {
           this.selectTopSearchMatch();
+        } else if (e.key === 'Escape') {
+          this.searchResultsElem.classList.add('hidden');
         }
         return;
       }
 
       const active = document.activeElement as HTMLElement | null;
+      if (active && this.searchResultsElem.contains(active)) return;
       const target = e.target instanceof HTMLElement ? e.target : null;
       const editableSelector = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
       if (active?.closest(editableSelector) || target?.closest(editableSelector) || active?.isContentEditable || target?.isContentEditable) return;
@@ -483,7 +492,7 @@ export class UIManager {
 
     const btnExposure = document.getElementById('btn-exposure')!;
     document.querySelectorAll<HTMLButtonElement>('[data-planet]').forEach(button => {
-      button.addEventListener('click', () => this.selectAndFlyToObject(button.dataset.planet!));
+      button.addEventListener('click', () => this.selectAndFocus('planet', button.dataset.planet!));
     });
     const btnSkySource = document.getElementById('btn-sky-source') as HTMLButtonElement;
     btnSkySource.addEventListener('click', async () => {
@@ -541,54 +550,36 @@ export class UIManager {
   }
 
   private handleSearch(query: string) {
-    const q = query.trim().toLowerCase();
-    if (q.length === 0) {
+    if (!query.trim()) {
       this.searchResultsElem.classList.add('hidden');
       this.searchResultsElem.replaceChildren();
       return;
     }
 
-    const matches: Array<{ name: string; type: string; id: string; item: any }> = [];
-
-    STARS_CATALOG.forEach(s => {
-      if (s.name.toLowerCase().includes(q) || s.constellation.toLowerCase().includes(q) || (s.stellarType && s.stellarType.toLowerCase().includes(q))) {
-        const badgeTag = s.isBrownDwarf ? 'Brown Dwarf' : `Star (${s.spectral})`;
-        matches.push({ name: s.name, type: badgeTag, id: s.id, item: s });
-      }
-    });
-
-    PLANET_EPHEMERIS.forEach(p => {
-      if (p.name.toLowerCase().includes(q)) {
-        matches.push({ name: p.name, type: 'Planet', id: p.id, item: p });
-      }
-    });
-
-    DEEP_SPACE_OBJECTS.forEach(d => {
-      if (d.name.toLowerCase().includes(q) || d.constellation.toLowerCase().includes(q)) {
-        const type = d.type === 'nebula' ? 'Nebula' : d.type === 'galaxy' ? 'Galaxy' : 'Galactic feature';
-        matches.push({ name: d.name, type, id: d.id, item: d });
-      }
-    });
-
+    const matches = searchCatalogue(query).slice(0, 8);
     if (matches.length === 0) {
-      this.searchResultsElem.innerHTML = `<div class="search-item-empty">No celestial objects found</div>`;
+      this.searchResultsElem.innerHTML = '<div class="search-item-empty" role="status">No celestial objects found</div>';
     } else {
-      this.searchResultsElem.innerHTML = matches.slice(0, 8).map(m => `
-        <div class="search-item" data-id="${m.id}" data-type="${m.type}">
-          <span class="item-name">${m.name}</span>
-          <span class="item-badge">${m.type}</span>
-        </div>
-      `).join('');
-
-      const items = this.searchResultsElem.querySelectorAll('.search-item');
-      items.forEach(el => {
-        el.addEventListener('click', () => {
-          const id = el.getAttribute('data-id')!;
-          this.selectAndFlyToObject(id);
+      this.searchResultsElem.replaceChildren(...matches.map(match => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'search-item';
+        button.dataset.id = match.id;
+        button.dataset.type = match.type;
+        const name = document.createElement('span');
+        name.className = 'item-name';
+        name.textContent = match.name;
+        const label = document.createElement('span');
+        label.className = 'item-badge';
+        label.textContent = match.label;
+        button.append(name, label);
+        button.addEventListener('click', () => {
+          this.selectAndFocus(match.type, match.id);
           this.searchResultsElem.classList.add('hidden');
           this.searchInput.value = '';
         });
-      });
+        return button;
+      }));
     }
 
     this.searchResultsElem.classList.remove('hidden');
@@ -596,39 +587,18 @@ export class UIManager {
 
   private selectTopSearchMatch() {
     if (this.searchResultsElem.classList.contains('hidden') || !this.searchInput.value.trim()) return;
-    const firstItem = this.searchResultsElem.querySelector('.search-item') as HTMLElement;
-    if (firstItem) {
-      const id = firstItem.getAttribute('data-id')!;
-      this.selectAndFlyToObject(id);
-      this.searchResultsElem.classList.add('hidden');
-      this.searchInput.value = '';
-    }
+    this.searchResultsElem.querySelector<HTMLButtonElement>('.search-item')?.click();
   }
 
-  private selectAndFlyToObject(id: string) {
-    const star = STARS_CATALOG.find(item => item.id === id);
-    if (star) {
-      // Search is catalogue-wide: reveal an explicitly requested filtered star.
-      if (!matchesSpectralFilter(star, this.engine.spectralFilter)) this.engine.setSpectralFilter('ALL');
-      this.engine.focusObject('star', id);
-      this.showDetailModal(this.engine.resolveSelection('star', id)!);
-      return;
+  private selectAndFocus(type: SelectedObjectType, id: string) {
+    const selection = this.engine.resolveSelection(type, id);
+    if (!selection) return;
+    if (selection.type === 'star' && !matchesSpectralFilter(selection.data, this.engine.spectralFilter)) {
+      this.engine.setSpectralFilter('ALL');
     }
-
-    const planetNode = this.engine.solSystemRenderer.planetsMap.get(id);
-    if (planetNode) {
-      this.engine.focusPlanet(id);
-      document.querySelectorAll<HTMLElement>('[data-planet]').forEach(button => button.classList.toggle('active', button.dataset.planet === id));
-      document.getElementById('btn-plane-align')!.textContent = '🪐 Plane: Ecliptic';
-      this.showDetailModal(this.engine.resolveSelection('planet', id)!);
-      return;
-    }
-
-    const dsoNode = this.engine.deepSpaceRenderer.objectsMap.get(id);
-    if (dsoNode) {
-      this.engine.focusObject('deepSpace', id);
-      this.showDetailModal(this.engine.resolveSelection('deepSpace', id)!);
-    }
+    this.engine.focusObject(type, id);
+    const current = this.engine.resolveSelection(type, id);
+    if (current) this.showDetailModal(current);
   }
 
   private bindEngineCallbacks() {
@@ -638,18 +608,27 @@ export class UIManager {
         return;
       }
 
-      const d = hovered.data;
-      const specColor = d.spectral ? getSpectralCssColor(d.spectral) : '#00e5ff';
+      const { type, data, position } = hovered;
+      const spectral = type === 'star' ? data.spectral : undefined;
+      let facts: [string, string][];
+      if (type === 'planet') {
+        facts = [['Type', planetKind(data.id)], ['Distance from Sun', planetDistance(position)]];
+      } else if (type === 'constellation') {
+        facts = [['Type', 'Constellation'], ['Stars in outline', String(new Set(data.lines.flat()).size)]];
+      } else {
+        const classification = type === 'star'
+          ? data.stellarType ?? (data.isBrownDwarf ? 'Brown dwarf' : 'Star')
+          : DEEP_SPACE_LABELS[data.type];
+        facts = [['Type', classification], ['Distance from Sol', `${data.dist.toLocaleString()} ly`], ['Region', data.constellation]];
+      }
 
       this.tooltipElem.innerHTML = `
         <div class="tooltip-header">
-          <span class="tooltip-title">${d.name}</span>
-          ${d.spectral ? `<span class="spec-badge" style="background:${specColor}">${d.spectral}</span>` : ''}
+          <span class="tooltip-title">${data.name}</span>
+          ${spectral ? `<span class="spec-badge" style="background:${getSpectralCssColor(spectral)}">${spectral}</span>` : ''}
         </div>
         <div class="tooltip-body">
-          <span>Type: <strong>${d.stellarType || d.type || 'Star'}</strong></span>
-          <span>Distance: <strong>${d.dist !== undefined ? d.dist + ' ly' : (d.a ? d.a + ' AU' : 'Sol System')}</strong></span>
-          <span>Constellation: <strong>${d.constellation || 'Solar System'}</strong></span>
+          ${facts.map(([label, value]) => `<span>${label}: <strong>${value}</strong></span>`).join('')}
         </div>
       `;
 
@@ -664,153 +643,100 @@ export class UIManager {
   }
 
   private showDetailModal(selection: ObjectSelection) {
-    const d = selection.data;
+    const { type, data, position } = selection;
     const content = document.getElementById('modal-content')!;
 
-    if (selection.type === 'planet') {
-      const appearance = PLANET_APPEARANCE[d.id];
+    if (type === 'planet') {
+      const appearance = PLANET_APPEARANCE[data.id];
+      const period = data.periodYears < 2 ? `${Math.round(data.periodYears * 365.25)} days` : `${data.periodYears.toFixed(1)} years`;
       content.innerHTML = `
-        <div class="modal-header planet-detail-header" style="--planet-colour:${d.color}">
-          <span class="modal-type-badge">${appearance.kind}</span><h2>${d.name}</h2>
-          <p class="planet-detail-subtitle">SOLAR SYSTEM / ${d.id === 'pluto' ? 'DWARF PLANET' : 'PLANET'}</p>
+        <div class="modal-header planet-detail-header" style="--planet-colour:${data.color}">
+          <span class="modal-type-badge">${appearance.kind}</span><h2>${data.name}</h2>
+          <p class="planet-detail-subtitle">Solar System / ${planetKind(data.id)}</p>
         </div>
         <p class="modal-description">${appearance.summary}</p>
         <div class="modal-grid">
-          <div class="stat-box"><span class="stat-label">Diameter</span><span class="stat-value">${Math.round(d.radiusKm*2).toLocaleString()} km</span></div>
-          <div class="stat-box"><span class="stat-label">Distance from Sun</span><span class="stat-value">${(selection.position.length()/LY_PER_AU).toFixed(2)} AU</span></div>
-          <div class="stat-box"><span class="stat-label">Orbital period</span><span class="stat-value">${d.periodYears < 2 ? Math.round(d.periodYears*365.25)+' days' : d.periodYears.toFixed(1)+' years'}</span></div>
-          <div class="stat-box"><span class="stat-label">Orbital inclination</span><span class="stat-value">${d.i.toFixed(2)}°</span></div>
+          ${stat('Diameter', `${Math.round(data.radiusKm * 2).toLocaleString()} km`)}
+          ${stat('Distance from Sun', planetDistance(position))}
+          ${stat('Orbital period', period)}
+          ${stat('Orbital inclination', `${data.i.toFixed(2)}°`)}
         </div>
         <p class="planet-model-note">Illustrative surface detail · enlarged for visibility.<br>Drag to orbit. Scroll to explore the surface.</p>
-        <div class="modal-actions"><button id="btn-inspect-planet" class="btn-action">Inspect ${d.name}</button><button id="btn-planet-home" class="btn-action secondary-action">Solar System</button></div>
+        <div class="modal-actions"><button id="btn-inspect-planet" class="btn-action">Inspect ${data.name}</button><button id="btn-planet-home" class="btn-action secondary-action">Solar System</button></div>
       `;
-      document.getElementById('btn-inspect-planet')!.addEventListener('click', () => this.engine.focusPlanet(d.id));
+      document.getElementById('btn-inspect-planet')!.addEventListener('click', () => this.engine.focusPlanet(data.id));
       document.getElementById('btn-planet-home')!.addEventListener('click', () => {
-        document.getElementById('btn-view-sol')!.click();
+        this.engine.setPresetViewpoint('sol_center');
         this.modalElem.classList.add('hidden');
       });
-      this.modalElem.classList.remove('hidden');
-      return;
+    } else {
+      const facts: string[] = [];
+      let kind: string;
+      let description = '';
+      let notes = '';
+      let spectralBadge = '';
+
+      if (type === 'star') {
+        kind = data.isBrownDwarf ? 'Brown dwarf' : 'Star';
+        description = data.description;
+        spectralBadge = `<span class="spec-badge-lg" style="background:${getSpectralCssColor(data.spectral)}">${data.spectral}</span>`;
+        facts.push(
+          stat('Classification', data.stellarType ?? kind),
+          stat('Distance from Sol', `${data.dist.toLocaleString()} ly`),
+          stat('Region', data.constellation),
+          stat('Apparent magnitude', data.mag)
+        );
+        if (data.temp !== undefined) facts.push(stat('Surface temperature', `${data.temp.toLocaleString()} K (${Math.round(data.temp - 273.15)}°C)`));
+        if (data.metallicity !== undefined) facts.push(stat('Metallicity [Fe/H]', `${data.metallicity >= 0 ? '+' : ''}${data.metallicity} dex`));
+        if (data.ageGyr !== undefined) facts.push(stat('Stellar age', `${data.ageGyr} Gyr`));
+        if (data.lum !== undefined) facts.push(stat('Luminosity', `${data.lum} L☉`));
+        if (data.rotationPeriodDays !== undefined) facts.push(stat('Rotation period', `${data.rotationPeriodDays} days`));
+        if (data.radialVelocityKmS !== undefined) facts.push(stat('Radial velocity', `${data.radialVelocityKmS > 0 ? '+' : ''}${data.radialVelocityKmS} km/s`));
+        if (data.properMotionMasYr !== undefined) facts.push(stat('Proper motion', `${data.properMotionMasYr} mas/yr`));
+        if (data.variableType) facts.push(stat('Variable class', data.variableType));
+        if (data.exoplanets !== undefined) facts.push(stat('Known exoplanets', data.exoplanets));
+        if (data.mag > 6.5) {
+          notes += '<p class="modal-source">Below the unaided-eye sky limit. Use a 3D map to see its catalogue marker. Enhanced sky exposure shows stars down to magnitude 14.</p>';
+        }
+        if (data.source) {
+          notes += `<p class="modal-source">Astrometry and visual magnitude from <a href="${data.source}" target="_blank" rel="noopener noreferrer">CDS/SIMBAD</a>. Distances are parallax-derived estimates.</p>`;
+        }
+      } else if (type === 'deepSpace') {
+        kind = DEEP_SPACE_LABELS[data.type];
+        description = data.description;
+        const major = data.galaxy?.majorArcmin ?? data.angularSizeArcmin;
+        const minor = data.galaxy?.minorArcmin ?? data.angularSizeMinorArcmin;
+        facts.push(
+          stat('Distance from Sol', `${data.dist.toLocaleString()} ly`),
+          stat('Constellation', data.constellation),
+          stat('Angular extent', minor ? `${major}′ × ${minor}′` : `${major}′`)
+        );
+        if (data.galaxy) {
+          facts.push(
+            stat('Morphology', data.galaxy.morphology),
+            stat('Position angle', `${data.galaxy.positionAngleDeg}° east of north`),
+            stat('Visual magnitude', `V ${data.galaxy.apparentMagnitudeV}`)
+          );
+          notes = `<p class="modal-source">Appearance data from ${data.galaxy.source}.</p>`;
+        }
+      } else {
+        kind = 'Constellation';
+        facts.push(stat('Stars in outline', new Set(data.lines.flat()).size), stat('Line segments', data.lines.length));
+      }
+
+      content.innerHTML = `
+        <div class="modal-header">
+          <span class="modal-type-badge">${kind}</span>
+          <h2>${data.name}</h2>
+          ${spectralBadge}
+        </div>
+        <div class="modal-grid">${facts.join('')}</div>
+        ${description ? `<p class="modal-description">${description}</p>` : ''}
+        ${notes}
+        <div class="modal-actions"><button id="btn-fly-focus" class="btn-action">🎯 Center Camera View</button></div>
+      `;
+      document.getElementById('btn-fly-focus')!.addEventListener('click', () => this.engine.focusObject(type, data.id));
     }
-
-    let typeTag = selection.type?.toUpperCase();
-    if (d.type === 'nebula') typeTag = 'NEBULA';
-    if (d.type === 'galaxy') typeTag = 'GALAXY';
-    if (d.type === 'galacticFeature') typeTag = 'GALACTIC FEATURE';
-    if (d.isBrownDwarf) typeTag = 'BROWN DWARF';
-    let spectralCss = d.spectral ? getSpectralCssColor(d.spectral) : '#00e5ff';
-
-    content.innerHTML = `
-      <div class="modal-header">
-        <span class="modal-type-badge">${typeTag}</span>
-        <h2>${d.name}</h2>
-        ${d.spectral ? `<span class="spec-badge-lg" style="background:${spectralCss}">${d.spectral}</span>` : ''}
-      </div>
-
-      <div class="modal-grid">
-        <div class="stat-box">
-          <span class="stat-label">Classification</span>
-          <span class="stat-value">${d.stellarType || 'Celestial Object'}</span>
-        </div>
-
-        <div class="stat-box">
-          <span class="stat-label">Distance</span>
-          <span class="stat-value">${d.dist !== undefined ? d.dist + ' Light-Years' : (d.a ? d.a + ' AU' : '0 AU')}</span>
-        </div>
-
-        <div class="stat-box">
-          <span class="stat-label">Constellation</span>
-          <span class="stat-value">${d.constellation || 'Solar System'}</span>
-        </div>
-
-        ${d.temp ? `
-        <div class="stat-box">
-          <span class="stat-label">Surface Temp</span>
-          <span class="stat-value">${d.temp.toLocaleString()} K (${Math.round(d.temp - 273.15)}°C)</span>
-        </div>` : ''}
-
-        ${d.metallicity !== undefined ? `
-        <div class="stat-box">
-          <span class="stat-label">Metallicity [Fe/H]</span>
-          <span class="stat-value">${d.metallicity >= 0 ? '+' : ''}${d.metallicity} dex</span>
-        </div>` : ''}
-
-        ${d.ageGyr !== undefined ? `
-        <div class="stat-box">
-          <span class="stat-label">Stellar Age</span>
-          <span class="stat-value">${d.ageGyr} Gyr</span>
-        </div>` : ''}
-
-        ${d.lum ? `
-        <div class="stat-box">
-          <span class="stat-label">Luminosity</span>
-          <span class="stat-value">${d.lum} L☉</span>
-        </div>` : ''}
-
-        ${d.rotationPeriodDays ? `
-        <div class="stat-box">
-          <span class="stat-label">Rotation Period</span>
-          <span class="stat-value">${d.rotationPeriodDays} days</span>
-        </div>` : ''}
-
-        ${d.radialVelocityKmS !== undefined ? `
-        <div class="stat-box">
-          <span class="stat-label">Radial Velocity</span>
-          <span class="stat-value">${d.radialVelocityKmS > 0 ? '+' : ''}${d.radialVelocityKmS} km/s</span>
-        </div>` : ''}
-
-        ${d.properMotionMasYr !== undefined ? `
-        <div class="stat-box">
-          <span class="stat-label">Proper Motion</span>
-          <span class="stat-value">${d.properMotionMasYr} mas/yr</span>
-        </div>` : ''}
-
-        ${d.variableType ? `
-        <div class="stat-box">
-          <span class="stat-label">Variable Class</span>
-          <span class="stat-value">${d.variableType}</span>
-        </div>` : ''}
-
-        ${d.exoplanets !== undefined ? `
-        <div class="stat-box">
-          <span class="stat-label">Known Exoplanets</span>
-          <span class="stat-value">${d.exoplanets}</span>
-        </div>` : ''}
-
-        ${d.galaxy ? `
-        <div class="stat-box">
-          <span class="stat-label">Morphology</span>
-          <span class="stat-value">${d.galaxy.morphology}</span>
-        </div>
-        <div class="stat-box">
-          <span class="stat-label">Angular Extent</span>
-          <span class="stat-value">${d.galaxy.majorArcmin}&prime; × ${d.galaxy.minorArcmin}&prime;</span>
-        </div>
-        <div class="stat-box">
-          <span class="stat-label">Position Angle</span>
-          <span class="stat-value">${d.galaxy.positionAngleDeg}&deg; east of north</span>
-        </div>
-        <div class="stat-box">
-          <span class="stat-label">Visual Magnitude</span>
-          <span class="stat-value">V ${d.galaxy.apparentMagnitudeV}</span>
-        </div>` : ''}
-      </div>
-
-      <p class="modal-description">${d.description || 'Astronomical telemetry data.'}</p>
-      ${selection.type === 'star' && d.mag > 6.5 ? '<p class="modal-source">Below the unaided-eye sky limit. Use a 3D map to see its catalogue marker; enhanced sky exposure shows objects down to magnitude 14.</p>' : ''}
-
-      ${d.galaxy?.source ? `<p class="modal-source">Appearance data: ${d.galaxy.source}.</p>` : ''}
-      ${selection.type === 'star' && d.source ? `<p class="modal-source">Astrometry and visual magnitude: <a href="${d.source}" target="_blank" rel="noopener noreferrer">CDS/SIMBAD</a>. Distances are parallax-derived estimates.</p>` : ''}
-
-      <div class="modal-actions">
-        <button id="btn-fly-focus" class="btn-action">🎯 Center Camera View</button>
-      </div>
-    `;
-
-    document.getElementById('btn-fly-focus')!.addEventListener('click', () => {
-      if (selection.type) this.engine.focusObject(selection.type, d.id);
-    });
-
     this.modalElem.classList.remove('hidden');
   }
 }

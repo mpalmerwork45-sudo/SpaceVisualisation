@@ -424,15 +424,22 @@ button.active {
 
 .search-item {
   display: flex;
+  width: 100%;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 10px 14px;
+  border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
   transition: background 0.15s ease;
 }
 
-.search-item:hover {
+.search-item:hover, .search-item:focus-visible {
   background: rgba(0, 229, 255, 0.15);
 }
 

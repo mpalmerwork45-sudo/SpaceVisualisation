@@ -9,16 +9,21 @@ import { StarFieldBackground } from './StarFieldBackground';
 import { angularDiameterToWorldSize, frameRotation, galacticFrameQuaternion, inwardViewDirection, orbitOffset, scaleDistance, viewDirectionToOrbitAngles, ViewMode } from '../utils/coordinates';
 import { StarData, STARS_CATALOG } from '../data/stars';
 import { DeepSpaceObjectData } from '../data/deepSpace';
-import { CONSTELLATIONS } from '../data/constellations';
+import { ConstellationData, CONSTELLATIONS } from '../data/constellations';
+import type { KeplerianElements } from '../utils/ephemeris';
 import { isSelectableHit, selectableObjects } from './ObjectPicking';
 
-export type SelectedObjectType = 'star' | 'planet' | 'deepSpace' | 'constellation' | null;
-
-export interface ObjectSelection {
-  type: SelectedObjectType;
-  data: StarData | DeepSpaceObjectData | any;
-  position: THREE.Vector3;
+interface SelectionData {
+  star: StarData;
+  planet: KeplerianElements;
+  deepSpace: DeepSpaceObjectData;
+  constellation: ConstellationData;
 }
+
+export type SelectedObjectType = keyof SelectionData;
+export type ObjectSelection = {
+  [Type in SelectedObjectType]: { type: Type; data: SelectionData[Type]; position: THREE.Vector3 }
+}[SelectedObjectType];
 
 export type CameraPreset =
   | 'sol_center'
@@ -75,7 +80,7 @@ export class SpaceEngine {
   public cameraFov: number = 55;
   public targetCameraFov: number = 55;
   private skyLookDirection: THREE.Vector3 | null = null;
-  private catalogueFocus: { type: NonNullable<SelectedObjectType>; id: string } | null = null;
+  private catalogueFocus: { type: SelectedObjectType; id: string } | null = null;
 
   private isDragging: boolean = false;
   private previousMousePosition = { x: 0, y: 0 };
@@ -413,7 +418,7 @@ export class SpaceEngine {
     this.onStateChange?.();
   }
 
-  public focusObject(type: NonNullable<SelectedObjectType>, id: string) {
+  public focusObject(type: SelectedObjectType, id: string) {
     if (type === 'planet') return this.focusPlanet(id);
     if (type === 'star' && id === 'sol') return this.setPresetViewpoint('sol_center');
     const selection = this.resolveSelection(type, id);
@@ -424,7 +429,6 @@ export class SpaceEngine {
 
   private frameObject(selection: ObjectSelection) {
     const { type, data, position } = selection;
-    if (!type) return;
     this.catalogueFocus = { type, id: data.id };
     this.focusedPlanetId = null;
     this.activePreset = null;
