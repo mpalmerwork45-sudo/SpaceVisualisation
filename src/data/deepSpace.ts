@@ -104,6 +104,7 @@ export const DEEP_SPACE_OBJECTS: DeepSpaceObjectData[] = [
     dec: 33.03,
     dist: 2570.0,
     angularSizeArcmin: 3,
+    positionAngleDeg: 60, // Optical main ring, O'Dell et al. 2013, Fig. 11.
     colorHex: 0x1de9b6,
     secondaryColorHex: 0xff3d00,
     constellation: 'Lyra',

@@ -718,7 +718,10 @@ export class UIManager {
           ${stat('Orbital period', period)}
           ${stat('Orbital inclination', `${data.i.toFixed(2)}°`)}
         </div>
-        <p class="planet-model-note">Illustrative surface detail · enlarged for visibility.<br>Drag to orbit. Scroll to explore the surface.</p>
+        <p class="planet-model-note">
+          ${appearance.surfaceCredit ? `Surface map from ${appearance.surfaceCredit}.` : 'Procedural surface detail.'}
+          Planet enlarged for visibility.<br>Drag to orbit. Scroll or pinch to zoom.
+        </p>
         <div class="modal-actions"><button id="btn-inspect-planet" class="btn-action">Inspect ${data.name}</button><button id="btn-planet-home" class="btn-action secondary-action">Solar System</button></div>
       `;
       document.getElementById('btn-inspect-planet')!.addEventListener('click', () => this.engine.focusPlanet(data.id));
@@ -775,6 +778,8 @@ export class UIManager {
             stat('Visual magnitude', `V ${data.galaxy.apparentMagnitudeV}`)
           );
           notes = `<p class="modal-source">Appearance data from ${data.galaxy.source}.</p>`;
+        } else if (data.positionAngleDeg !== undefined) {
+          facts.push(stat('Position angle', `${data.positionAngleDeg}° east of north`));
         }
       } else {
         kind = 'Constellation';
