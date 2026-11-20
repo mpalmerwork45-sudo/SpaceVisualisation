@@ -188,15 +188,15 @@ try {
   results.sky = await page.evaluate(() => {
     click('btn-mode-real'); snap();
     check(!engine.starRenderer.starsMap.has('sol'),'3: observer Sun is not placed on the angular sky');
-    check(!engine.starRenderer.starsMap.get('wise_0855').mesh.visible,'3: magnitude-25 brown dwarf is invisible in eye sky');
-    check(!engine.starRenderer.starsMap.get('proxima_centauri').mesh.visible,'3: faint star is invisible to the eye');
+    check(!engine.starRenderer.starsMap.get('wise_0855').visible,'3: magnitude-25 brown dwarf is invisible in eye sky');
+    check(!engine.starRenderer.starsMap.get('proxima_centauri').visible,'3: faint star is invisible to the eye');
     click('btn-exposure');
-    check(engine.starRenderer.starsMap.get('proxima_centauri').mesh.visible,'3: enhanced exposure can reveal a faint star');
+    check(engine.starRenderer.starsMap.get('proxima_centauri').visible,'3: enhanced exposure can reveal a faint star');
     click('btn-exposure');
     search('WISE 0855');
     check(document.getElementById('modal-content').textContent.includes('Below the unaided-eye sky limit'),'3: invisible searched objects have an explicit visibility explanation');
     click('btn-close-modal');
-    return { visibleEyeStars: [...engine.starRenderer.starsMap.values()].filter(node => node.mesh.visible).length };
+    return { visibleEyeStars: [...engine.starRenderer.starsMap.values()].filter(node => node.visible).length };
   });
 
   results.picking = await page.evaluate(() => {
@@ -288,6 +288,36 @@ try {
     const missing = constellations.flatMap(item => item.lines.flat().filter(id => !catalogue.some(star => star.id === id)));
     check(missing.length === 0,'9: every constellation endpoint exists in the catalogue');
     return { stars: catalogue.length, missingEndpoints: missing.length };
+  });
+
+  results.catalogueBatch = await page.evaluate(() => {
+    const e = engine;
+    click('btn-mode-real');
+    search('Sirius'); snap();
+    let selected;
+    const onSelect = e.onSelectObject;
+    e.onSelectObject = value => { selected = value; };
+    e.mouse.set(0,0);
+    e.checkClick();
+    e.onSelectObject = onSelect;
+    check(selected?.data.id === 'sirius_a', 'batched markers preserve catalogue identity when picked on the sky');
+    click('btn-close-modal');
+
+    click('btn-mode-log');
+    if (e.planeAlignment !== 'galactic') click('btn-plane-align');
+    const update = e.starRenderer.updateStars;
+    const geometry = e.starRenderer.points.geometry;
+    let rebuilds = 0;
+    e.starRenderer.updateStars = function(...args) { rebuilds++; return update.apply(this, args); };
+    click('btn-view-sol'); snap();
+    check(rebuilds === 1, 'the Solar System preset rebuilds the catalogue only once when mode and frame both change');
+    click('btn-view-sol'); snap();
+    e.starRenderer.updateStars = update;
+    check(rebuilds === 1, 'repeating the preset reuses the prepared scene');
+    const count = geometry.drawRange.count;
+    check(geometry === e.starRenderer.points.geometry && count === catalogue.length - 1,
+      'catalogue stars share one point geometry while the Sun keeps its own marker');
+    return {rebuilds, batchedStars:count};
   });
 
   results.resources = await page.evaluate(() => {

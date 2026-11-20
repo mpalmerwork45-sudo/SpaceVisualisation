@@ -113,6 +113,8 @@ and eye colour is muted. Invisible stars have no pickable geometry or labels.
 The physical/logarithmic maps retain all catalogue navigation markers; searching
 for a faint star still opens its information and explains the visibility limit.
 These conventions are not physiological or telescope calibrations.
+The catalogue uses one point buffer for unresolved stars and a separate marker
+for Sol. Screen-space picking uses the same pixel radii as the star draw.
 
 Changing coordinate alignment transforms the current and target camera anchors,
 orbit directions, up vector and all planetary/orbital geometry together, preserving

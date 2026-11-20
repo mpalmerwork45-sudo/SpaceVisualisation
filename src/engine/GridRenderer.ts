@@ -7,6 +7,7 @@ export class GridRenderer {
   private ringsGroup: THREE.Group;
   private gridMesh: THREE.GridHelper;
   private axisLines: THREE.LineSegments;
+  private ringMode: ViewMode = 'linear';
 
   constructor() {
     this.group = new THREE.Group();
@@ -48,7 +49,10 @@ export class GridRenderer {
   public get ringsVisible() { return this.ringsGroup.visible; }
 
   public updateGrid(viewMode: ViewMode, _planeAlignment: PlaneAlignment) {
-    this.createDistanceRings(viewMode);
+    const mode = viewMode === 'logarithmic' ? viewMode : 'linear';
+    if (mode === this.ringMode) return;
+    this.createDistanceRings(mode);
+    this.ringMode = mode;
   }
 
   private createDistanceRings(viewMode: ViewMode) {

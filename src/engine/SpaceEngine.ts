@@ -141,12 +141,12 @@ export class SpaceEngine {
     this.milkyWay = new MilkyWayBackground();
     this.scene.add(this.milkyWay.mesh);
 
-    // 6. Sub-Pixel 65,000 3D Vector Pinpoint Starfield
+    // 6. Procedural background stars
     this.starField = new StarFieldBackground();
     this.scene.add(this.starField.points);
 
     // 7. Sub-renderers
-    this.starRenderer = new StarRenderer();
+    this.starRenderer = new StarRenderer(this.renderer.getPixelRatio());
     this.scene.add(this.starRenderer.group);
 
     this.constellationRenderer = new ConstellationRenderer();
@@ -168,6 +168,7 @@ export class SpaceEngine {
     this.mouse = new THREE.Vector2();
 
     // Default Viewpoint: Planetary Level zoom centered on Sol
+    this.rebuildAllData();
     this.setPresetViewpoint('sol_center');
     // Apply the opening pose before the first frame, without an initial glide.
     this.applyTargetCameraPose();
@@ -242,7 +243,7 @@ export class SpaceEngine {
     this.gridRenderer.setRingsVisible(mode !== 'realistic');
     this.gridRenderer.setGridVisible(mode !== 'realistic');
     if (mode === 'realistic') this.setObservationMode('darkAdaptedEye');
-    this.rebuildAllData();
+    if (mode !== previousMode) this.rebuildAllData();
 
     const selection = focus && this.resolveSelection(focus.type, focus.id);
     if (selection) this.frameObject(selection);
@@ -274,7 +275,14 @@ export class SpaceEngine {
   }
 
   public setPlaneAlignment(alignment: PlaneAlignment) {
-    console.log(`🔄 [SpaceEngine] Alignment changed to "${alignment}"`);
+    if (!this.rotatePlaneAlignment(alignment)) return;
+    this.rebuildAllData();
+    this.updateCameraPosition();
+    this.onStateChange?.();
+  }
+
+  private rotatePlaneAlignment(alignment: PlaneAlignment) {
+    if (alignment === this.planeAlignment) return false;
     const rotation = frameRotation(this.planeAlignment, alignment);
     this.cameraTarget.applyQuaternion(rotation);
     this.targetCameraTarget.applyQuaternion(rotation);
@@ -291,12 +299,11 @@ export class SpaceEngine {
     this.activePreset = null;
     this.milkyWay.setPlaneAlignment(alignment);
     this.starField.setPlaneAlignment(alignment);
-    this.rebuildAllData();
-    this.updateCameraPosition();
-    this.onStateChange?.();
+    return true;
   }
 
   public setSpectralFilter(filter: string) {
+    if (filter === this.spectralFilter) return;
     this.spectralFilter = filter;
     this.starRenderer.updateStars(this.viewMode, this.planeAlignment, filter);
     this.constellationRenderer.updateConstellations(this.starRenderer, this.viewMode, this.planeAlignment);
@@ -358,36 +365,22 @@ export class SpaceEngine {
     this.targetCameraRoll = 0;
     this.targetCameraFov = 55;
 
-    if (preset === 'sol_center') {
-      this.viewMode = 'linear';
-      this.setPlaneAlignment('ecliptic');
-      this.gridRenderer.setRingsVisible(false);
-      this.gridRenderer.setGridVisible(true);
-      this.rebuildAllData();
-      this.targetCameraTarget.set(0, 0, 0);
-      this.targetCameraRadius = SOL_CAMERA_RADIUS;
+    const solView = preset === 'sol_center';
+    const frameChanged = this.rotatePlaneAlignment(preset === 'look_galactic_pole' ? 'galactic' : 'ecliptic');
+    const modeChanged = this.viewMode !== 'linear';
+    this.viewMode = 'linear';
+    this.gridRenderer.setRingsVisible(!solView);
+    this.gridRenderer.setGridVisible(true);
+    if (frameChanged || modeChanged) this.rebuildAllData();
+    this.targetCameraTarget.set(0, 0, 0);
+    this.targetCameraRadius = solView ? SOL_CAMERA_RADIUS : 85;
+    if (solView) {
       // Keep planetary coordinates ecliptic-aligned, but face the Galactic
       // centre (l=0, b=0) through Sol from the anticentre side of the system.
       this.setTargetViewDirection(
         new THREE.Vector3(1, 0, 0).applyQuaternion(galacticFrameQuaternion('ecliptic'))
       );
-    } else if (preset === 'look_galactic_pole') {
-      this.setPlaneAlignment('galactic');
-      this.viewMode = 'linear';
-      this.gridRenderer.setRingsVisible(true);
-      this.gridRenderer.setGridVisible(true);
-      this.rebuildAllData();
-      this.targetCameraTarget.set(0, 0, 0);
-      this.targetCameraRadius = 85;
-      this.setTargetViewDirection(new THREE.Vector3(0, -1, 0));
-    } else if (preset === 'ecliptic_north') {
-      this.setPlaneAlignment('ecliptic');
-      this.viewMode = 'linear';
-      this.gridRenderer.setRingsVisible(true);
-      this.gridRenderer.setGridVisible(true);
-      this.rebuildAllData();
-      this.targetCameraTarget.set(0, 0, 0);
-      this.targetCameraRadius = 85;
+    } else {
       this.setTargetViewDirection(new THREE.Vector3(0, -1, 0));
     }
     this.camera.up.set(0, 1, 0);
@@ -411,8 +404,10 @@ export class SpaceEngine {
   public focusPlanet(id: string) {
     if (!this.solSystemRenderer.planetsMap.has(id)) return;
     this.clearFocus();
+    const frameChanged = this.rotatePlaneAlignment('ecliptic');
+    if (frameChanged) this.updateCameraPosition();
     if (this.viewMode !== 'linear') this.setViewMode('linear');
-    if (this.planeAlignment !== 'ecliptic') this.setPlaneAlignment('ecliptic');
+    else if (frameChanged) this.rebuildAllData();
     const selection = this.resolveSelection('planet', id);
     if (selection) this.frameObject(selection);
     this.onStateChange?.();
@@ -671,6 +666,8 @@ export class SpaceEngine {
     this.scene.updateMatrixWorld(true);
     this.camera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.mouse, this.camera);
+    const canvas = this.renderer.domElement;
+    const star = this.starRenderer.pickStar(this.camera, this.mouse, canvas.clientWidth, canvas.clientHeight);
     // A fixed pixel hit tolerance; the default 1-world-unit line threshold
     // swallowed the entire AU-scale Solar System.
     const objects = selectableObjects([this.starRenderer.group, this.solSystemRenderer.group, this.deepSpaceRenderer.group, this.constellationRenderer.group]);
@@ -686,11 +683,12 @@ export class SpaceEngine {
     hits.sort((a, b) => a.distance - b.distance);
     for (const hit of hits) {
       if (!isSelectableHit(hit)) continue;
+      if (star && star.distance < hit.distance) return this.resolveSelection('star', star.id);
       const info = hit.object.userData;
       const data = info.starData || info.planetData || info.deepObjectData || info.constellationData;
       if (data) return this.resolveSelection(info.type, data.id);
     }
-    return null;
+    return star ? this.resolveSelection('star', star.id) : null;
   }
 
   private checkHover(screenX: number, screenY: number) {

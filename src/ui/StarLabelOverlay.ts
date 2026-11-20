@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SpaceEngine } from '../engine/SpaceEngine';
+import type { StarData } from '../data/stars';
 
 export class StarLabelOverlay {
   private engine: SpaceEngine;
@@ -34,10 +35,8 @@ export class StarLabelOverlay {
 
     interface LabelCandidate {
       id: string;
-      star: any;
-      position: THREE.Vector3;
+      star: StarData;
       screenPos: THREE.Vector2;
-      distToCenter: number;
       score: number; // Lower score = higher priority
     }
 
@@ -45,7 +44,7 @@ export class StarLabelOverlay {
 
     // 1. Gather all candidate stars currently in front of camera
     this.engine.starRenderer.starsMap.forEach((starNode, id) => {
-      if (!starNode.mesh.visible) return;
+      if (!starNode.visible) return;
       // At planetary scale reserve the foreground for planet labels.
       if (this.engine.cameraRadius < 0.005 && this.engine.solSystemRenderer.group.visible && id !== 'sol') return;
       const star = starNode.data;
@@ -69,9 +68,7 @@ export class StarLabelOverlay {
         candidates.push({
           id,
           star,
-          position: starNode.position,
           screenPos,
-          distToCenter,
           score
         });
       }
