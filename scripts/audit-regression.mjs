@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { checkCatalogueModels } from './catalogue-render-check.mjs';
+import { checkSurveySky } from './survey-render-check.mjs';
 
 // Run against a Vite dev server: AUDIT_URL=http://127.0.0.1:5179 npm run test:browser
 // CHROME_PATH can use an installed browser instead of Playwright's Chromium.
@@ -90,6 +91,8 @@ try {
       engine.renderer.render(engine.scene,engine.camera);
     };
   });
+
+  results.surveySky = await checkSurveySky(page, output);
 
   results.frame = await page.evaluate(() => {
     click('btn-view-sol'); snap();
@@ -487,13 +490,27 @@ try {
       return { height, litPixels };
     };
     try {
+      const started = performance.now();
+      while (!galaxy.material.uniforms.uUseDustAtlas.value) {
+        if (performance.now() - started > 10000) throw new Error('Timed out loading the M31 dust atlas');
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
       const faceOn = measureView(normal, discAxis, 2.8);
+      const mapped = pixels.slice();
+      galaxy.material.uniforms.uUseDustAtlas.value = false;
+      measureView(normal, discAxis, 2.8);
+      let changedPixels = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (Math.abs(pixels[i+1] - mapped[i+1]) > 3) changedPixels++;
+      }
+      check(changedPixels > 100, 'measured M31 dust columns visibly change the face-on galaxy');
+      galaxy.material.uniforms.uUseDustAtlas.value = true;
       const edgeOn = measureView(discAxis, normal, 2.8);
       const interior = measureView(discAxis, normal, 0.15);
       check(faceOn.litPixels > 200 && edgeOn.litPixels > 100 && faceOn.height > edgeOn.height * 1.4,
         'Andromeda renders a broader face-on disc and a thinner edge-on profile');
       check(interior.litPixels > 100, 'galaxy ray integration works for an observer inside the volume');
-      return { faceOn, edgeOn, interior };
+      return { faceOn, edgeOn, interior, changedPixels };
     } finally {
       renderer.setRenderTarget(previousTarget);
       target.dispose();
@@ -502,6 +519,23 @@ try {
   });
 
   results.catalogueModels = await checkCatalogueModels(page, output);
+
+  results.galacticViews = await page.evaluate(async () => {
+    const e = engine;
+    await e.setMilkyWayMode('photo');
+    for (const [name, lon] of [['Coalsack', 302], ['Cygnus Rift', 78]]) {
+      search(name); snap();
+      const dir = e.camera.getWorldDirection(new THREE.Vector3());
+      const l = (THREE.MathUtils.radToDeg(Math.atan2(-dir.z, dir.x))+360)%360;
+      check(e.camera.position.lengthSq() === 0 && Math.abs(l-lon) < 0.01 && e.milkyWay.mode === 'render',
+        `searching for ${name} opens its measured dust field from Sol`);
+    }
+    search('Milky Way'); snap();
+    check(e.viewMode === 'linear' && e.camera.position.y > 100000 && e.cameraTarget.x === 26700,
+      'Milky Way search opens an exterior orbit about the Galactic centre');
+    return { radiusLy: e.cameraRadius, fieldOfView: e.camera.fov };
+  });
+  await captureView('milky-way');
 
   results.eyeAdaptation = await page.evaluate(() => {
     const e = engine;
