@@ -541,9 +541,17 @@ export class SpaceEngine {
       // Ring geometry is expressed in equatorial planet radii.
       const outerRadius = planet.rings?.geometry.parameters.outerRadius ?? 1;
       this.aimOrbit(position, this.inspectionDistance(planet.mesh.userData.displayRadius * outerRadius, 0.53));
-      // View the sunlit side from slightly above the orbital plane.
-      const direction = position.clone().normalize().add(new THREE.Vector3(0, -0.4, -0.25));
-      this.setTargetViewDirection(direction);
+      // An oblique phase reveals relief at the terminator. For Saturn, select
+      // the illuminated side of the ring plane so the gaps and shadows read.
+      const radial = position.clone().normalize();
+      const pole = new THREE.Vector3(0, 1, 0);
+      if (planet.rings) {
+        pole.applyQuaternion(planet.mesh.quaternion);
+        if (pole.dot(radial) > 0) pole.negate();
+      }
+      const across = new THREE.Vector3().crossVectors(pole, radial).normalize();
+      const above = new THREE.Vector3().crossVectors(radial, across);
+      this.setTargetViewDirection(radial.addScaledVector(across, 0.9).addScaledVector(above, -0.8));
       this.targetCameraRoll = 0;
       this.camera.up.set(0, 1, 0);
       this.focusedPlanetId = data.id;

@@ -116,6 +116,28 @@ describe('Solar System opening/reset preset', () => {
 });
 
 describe('frame and catalogue state regressions', () => {
+  it('reveals the planetary terminator and the sunlit side of Saturn’s rings across orbital dates', () => {
+    const engine = cameraHarness();
+    engine.solSystemRenderer = new SolSystemRenderer();
+    for (const date of ['2010-01-01', '2025-07-01', '2041-03-01']) {
+      engine.solSystemRenderer.updateDate(new Date(date));
+      for (const id of ['earth', 'saturn']) {
+        engine.focusPlanet(id);
+        const { mesh, rings } = engine.solSystemRenderer.planetsMap.get(id)!;
+        const sun = mesh.position.clone().normalize().negate();
+        const observer = orbitOffset(1, engine.targetCameraTheta, engine.targetCameraPhi);
+        const phase = THREE.MathUtils.radToDeg(observer.angleTo(sun));
+        expect(phase).toBeGreaterThan(40);
+        expect(phase).toBeLessThan(60);
+        if (rings) {
+          const pole = new THREE.Vector3(0, 1, 0).applyQuaternion(mesh.quaternion);
+          expect(pole.dot(observer) * pole.dot(sun)).toBeGreaterThan(0);
+        }
+      }
+    }
+    engine.solSystemRenderer.dispose();
+  });
+
   it('frames a compact nebula and an extended galaxy on the shorter viewport axis', () => {
     const engine = cameraHarness();
     engine.deepSpaceRenderer = new DeepSpaceRenderer();
