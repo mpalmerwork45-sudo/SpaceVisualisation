@@ -7,6 +7,7 @@ import { GridRenderer } from './GridRenderer';
 import { MilkyWayBackground, MilkyWayMode } from './MilkyWayBackground';
 import { StarFieldBackground } from './StarFieldBackground';
 import { LocalDustVolume } from './LocalDustVolume';
+import { GALACTIC_CENTRE_KPC, LY_PER_KPC } from './GalacticSkyModel';
 import { angularDiameterToWorldSize, frameRotation, galacticFrameQuaternion, inwardViewDirection, orbitOffset, scaleDistance, viewDirectionToOrbitAngles, ViewMode } from '../utils/coordinates';
 import { StarData, STARS_CATALOG } from '../data/stars';
 import { DeepSpaceObjectData } from '../data/deepSpace';
@@ -33,6 +34,8 @@ export type CameraPreset =
   | 'look_galactic_pole'
   | 'ecliptic_north'
   | 'realistic_sky';
+
+export type GalacticView = 'milky_way' | 'coalsack' | 'cygnus_rift';
 
 const MIN_CAMERA_PHI = 0.0001;
 const MAX_CAMERA_PHI = Math.PI - MIN_CAMERA_PHI;
@@ -327,6 +330,30 @@ export class SpaceEngine {
   public async setMilkyWayMode(mode: MilkyWayMode) {
     await this.milkyWay.setMode(mode);
     if (!this.disposed) this.starField.points.visible = this.milkyWay.mode === 'render';
+  }
+
+  /** Search destinations for the extended dust clouds and the entire Galactic disc. */
+  public inspectGalacticView(view: GalacticView) {
+    this.clearFocus();
+    const external = view === 'milky_way';
+    this.setViewMode(external ? 'linear' : 'realistic');
+    this.setPlaneAlignment('galactic');
+    this.gridRenderer.setRingsVisible(false);
+    this.gridRenderer.setGridVisible(false);
+    this.setObservationMode('enhancedOptical');
+    this.targetCameraRoll = 0;
+    this.camera.up.set(0, 1, 0);
+    if (external) {
+      this.aimOrbit(new THREE.Vector3(GALACTIC_CENTRE_KPC * LY_PER_KPC, 0, 0), 32 * LY_PER_KPC);
+      this.targetCameraFov = 39;
+      this.setTargetViewDirection(new THREE.Vector3(0, -1, 0));
+    } else {
+      const l = THREE.MathUtils.degToRad(view === 'coalsack' ? 302 : 78);
+      const b = THREE.MathUtils.degToRad(view === 'coalsack' ? -2 : 2);
+      this.aimSky(new THREE.Vector3(Math.cos(l)*Math.cos(b), Math.sin(b), -Math.sin(l)*Math.cos(b)), 16);
+    }
+    this.applyTargetCameraPose();
+    this.onStateChange?.();
   }
 
   public setPlaneAlignment(alignment: PlaneAlignment) {

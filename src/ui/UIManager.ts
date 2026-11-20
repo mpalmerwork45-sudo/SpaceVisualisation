@@ -157,7 +157,7 @@ export class UIManager {
             <button id="btn-exposure" class="btn-icon" title="Eye exposure adapts to bright foreground objects. Enhanced exposure keeps a brighter, fixed setting." aria-pressed="false">
               🌙 Eye Exposure
             </button>
-            <button id="btn-sky-source" class="btn-icon" title="Switch the Milky Way between a procedural render and an ESO photographic reference" aria-pressed="false">
+            <button id="btn-sky-source" class="btn-icon" title="Switch between the 3D survey-based Milky Way and the ESO sky photograph" aria-pressed="false">
               Galaxy: Render
             </button>
           </div>
@@ -557,10 +557,7 @@ export class UIManager {
       btnSkySource.disabled = true;
       btnSkySource.textContent = mode === 'photo' ? 'Loading photograph…' : 'Galaxy: Render';
       try {
-        await this.engine.setMilkyWayMode(mode);
-        btnSkySource.textContent = mode === 'photo' ? 'Galaxy: Photo' : 'Galaxy: Render';
-        btnSkySource.setAttribute('aria-pressed', String(mode === 'photo'));
-        document.getElementById('sky-credit')!.classList.toggle('hidden', mode !== 'photo');
+        await this.changeSkySource(mode);
       } catch (error) {
         btnSkySource.textContent = 'Photo unavailable · Retry';
         console.warn('Unable to load the reference photograph.', error);
@@ -606,6 +603,15 @@ export class UIManager {
     activeBtn.classList.add('active');
   }
 
+  private async changeSkySource(mode: 'photo' | 'render') {
+    await this.engine.setMilkyWayMode(mode);
+    const photo = this.engine.milkyWay.mode === 'photo';
+    const button = document.getElementById('btn-sky-source')!;
+    button.textContent = photo ? 'Galaxy: Photo' : 'Galaxy: Render';
+    button.setAttribute('aria-pressed', String(photo));
+    document.getElementById('sky-credit')!.classList.toggle('hidden', !photo);
+  }
+
   private handleSearch(query: string) {
     if (!query.trim()) {
       this.searchResultsElem.classList.add('hidden');
@@ -631,7 +637,13 @@ export class UIManager {
         label.textContent = match.label;
         button.append(name, label);
         button.addEventListener('click', () => {
-          this.selectAndFocus(match.type, match.id);
+          if (match.type === 'viewpoint') {
+            this.modalElem.classList.add('hidden');
+            void this.changeSkySource('render');
+            this.engine.inspectGalacticView(match.id);
+          } else {
+            this.selectAndFocus(match.type, match.id);
+          }
           this.searchResultsElem.classList.add('hidden');
           this.searchInput.value = '';
         });

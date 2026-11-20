@@ -1,7 +1,7 @@
 import { CONSTELLATIONS } from '../data/constellations';
 import { DEEP_SPACE_OBJECTS } from '../data/deepSpace';
 import { STARS_CATALOG } from '../data/stars';
-import type { SelectedObjectType } from '../engine/SpaceEngine';
+import type { GalacticView, SelectedObjectType } from '../engine/SpaceEngine';
 import { PLANET_EPHEMERIS } from '../utils/ephemeris';
 
 export const DEEP_SPACE_LABELS = {
@@ -14,13 +14,6 @@ export function planetKind(id: string) {
   return id === 'pluto' ? 'Dwarf planet' : 'Planet';
 }
 
-interface SearchResult {
-  type: SelectedObjectType;
-  id: string;
-  name: string;
-  label: string;
-}
-
 function normalize(text: string) {
   return text.normalize('NFKD').toLowerCase()
     .replace(/\p{M}/gu, '')
@@ -29,7 +22,9 @@ function normalize(text: string) {
     .trim();
 }
 
-function indexEntry(type: SelectedObjectType, item: { id: string; name: string }, label: string, terms: string[] = []) {
+function indexEntry<T extends SelectedObjectType | 'viewpoint', ID extends string>(
+  type: T, item: { id: ID; name: string }, label: string, terms: string[] = []
+) {
   const { id, name } = item;
   const aliases = [...name.matchAll(/\(([^)]+)\)/g)].flatMap(match => match[1].split('/'));
   return {
@@ -41,14 +36,23 @@ function indexEntry(type: SelectedObjectType, item: { id: string; name: string }
   };
 }
 
+const galacticViews: { id: GalacticView; name: string }[] = [
+  { id: 'milky_way', name: 'Milky Way' },
+  { id: 'coalsack', name: 'Coalsack Nebula' },
+  { id: 'cygnus_rift', name: 'Cygnus Rift' }
+];
+
 const catalogue = [
   ...STARS_CATALOG.map(star => indexEntry('star', star,
     star.isBrownDwarf ? 'Brown dwarf' : `Star (${star.spectral})`,
     [star.constellation, star.stellarType ?? ''])),
   ...PLANET_EPHEMERIS.map(planet => indexEntry('planet', planet, planetKind(planet.id))),
   ...DEEP_SPACE_OBJECTS.map(object => indexEntry('deepSpace', object, DEEP_SPACE_LABELS[object.type], [object.constellation])),
-  ...CONSTELLATIONS.map(constellation => indexEntry('constellation', constellation, 'Constellation'))
+  ...CONSTELLATIONS.map(constellation => indexEntry('constellation', constellation, 'Constellation')),
+  ...galacticViews.map(view => indexEntry('viewpoint', view, 'Galactic viewpoint'))
 ];
+
+type SearchResult = (typeof catalogue)[number]['result'];
 
 export function searchCatalogue(query: string): SearchResult[] {
   const text = normalize(query);
