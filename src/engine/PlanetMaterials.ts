@@ -100,19 +100,19 @@ const fragmentShader = /* glsl */ `
 
 const planetIds = ['mercury','venus','earth','mars','jupiter','saturn','uranus','neptune','pluto'];
 
-export function createPlanetMaterial(id: string, colour: string, position: THREE.Vector3) {
+export function createPlanetMaterial(id: string, colour: string) {
   return new THREE.ShaderMaterial({
     vertexShader, fragmentShader,
     uniforms: {
       uBase: { value: new THREE.Color(colour) },
-      uSun: { value: position.clone().negate().normalize() },
+      uSun: { value: new THREE.Vector3() },
       uKind: { value: planetIds.indexOf(id) },
       uTime: { value: 0 }
     }
   });
 }
 
-export function createSaturnRings(radius: number, sunDirection: THREE.Vector3): THREE.Mesh {
+export function createSaturnRings(radius: number) {
   const geometry = new THREE.RingGeometry(1.24, 2.32, 192);
   const material = new THREE.ShaderMaterial({
     vertexShader: `
@@ -145,7 +145,7 @@ export function createSaturnRings(radius: number, sunDirection: THREE.Vector3): 
         #include <colorspace_fragment>
       }
     `,
-    uniforms: { uSun: { value: sunDirection } },
+    uniforms: { uSun: { value: new THREE.Vector3() } },
     transparent: true, side: THREE.DoubleSide, depthWrite: false
   });
   const mesh = new THREE.Mesh(geometry, material);

@@ -11,8 +11,9 @@ import {
 
 export interface RenderedPlanet {
   data: KeplerianElements;
-  mesh: THREE.Mesh;
+  mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
   orbitLine: THREE.LineLoop;
+  rings?: ReturnType<typeof createSaturnRings>;
 }
 
 export class SolSystemRenderer {
@@ -20,16 +21,14 @@ export class SolSystemRenderer {
   public planetsMap: Map<string, RenderedPlanet> = new Map();
   private orbitLinesGroup: THREE.Group;
   private isOrbitsVisible: boolean = false; // Default OFF as requested
-  private alignment: CelestialAlignment = 'ecliptic';
 
-  constructor() {
+  constructor(date = new Date()) {
     this.group = new THREE.Group();
     this.orbitLinesGroup = new THREE.Group();
     this.orbitLinesGroup.visible = false; // Default OFF as requested
     this.group.add(this.orbitLinesGroup);
 
-    console.log('🪐 [SolSystemRenderer] Instantiated with exact Keplerian ephemeris & astronomical AU light-year scaling.');
-    this.createSolSystem();
+    this.createSolSystem(date);
   }
 
   public setOrbitsVisible(visible: boolean) {
@@ -41,12 +40,29 @@ export class SolSystemRenderer {
   public get orbitsVisible() { return this.isOrbitsVisible; }
 
   public setPlaneAlignment(alignment: CelestialAlignment) {
-    this.alignment = alignment;
     this.group.quaternion.copy(frameRotation('ecliptic', alignment));
-    this.planetsMap.forEach(({ mesh }) => {
-      (mesh.material as THREE.ShaderMaterial).uniforms.uSun.value
-        .copy(mesh.position).negate().normalize().applyQuaternion(this.group.quaternion);
-    });
+    this.updateSunlight();
+  }
+
+  public updateDate(date: Date) {
+    for (const { mesh, data } of this.planetsMap.values()) {
+      mesh.position.copy(calculatePlanetPositionAU(data, date)).multiplyScalar(LY_PER_AU);
+    }
+    this.updateSunlight();
+  }
+
+  private updateSunlight() {
+    const inverse = new THREE.Quaternion();
+    for (const { mesh, rings } of this.planetsMap.values()) {
+      const sun = mesh.material.uniforms.uSun.value as THREE.Vector3;
+      sun.copy(mesh.position).negate().normalize();
+      if (rings) {
+        rings.material.uniforms.uSun.value.copy(sun)
+          .applyQuaternion(inverse.copy(mesh.quaternion).invert())
+          .applyQuaternion(inverse.copy(rings.quaternion).invert());
+      }
+      sun.applyQuaternion(this.group.quaternion);
+    }
   }
 
   private clearBodies() {
@@ -66,38 +82,27 @@ export class SolSystemRenderer {
   public dispose() { this.clearBodies(); }
 
   public createSolSystem(currentDate: Date = new Date()) {
-    console.log(`🪐 [SolSystemRenderer] Computing real-time planet positions for date: ${currentDate.toISOString()}`);
-
     this.clearBodies();
 
     PLANET_EPHEMERIS.forEach((planet) => {
-      // 1. Calculate 3D position in AU at user's current date
-      const posAU = calculatePlanetPositionAU(planet, currentDate);
-      // Convert AU to light-years
-      const posLY = posAU.clone().multiplyScalar(LY_PER_AU);
-
       // Planet sphere mesh radius scaled proportionally for close-up viewing
       // Compress size ratios for navigation, retaining distinct relative sizes.
       // Positions remain in AU; the UI explicitly describes enlarged bodies.
       const radiusLY = 0.000002 * Math.pow(planet.radiusKm / 6371, 0.35);
       const geo = new THREE.SphereGeometry(radiusLY, 64, 48);
-      const mat = createPlanetMaterial(planet.id, planet.color, posLY);
+      const mat = createPlanetMaterial(planet.id, planet.color);
 
       const planetMesh = new THREE.Mesh(geo, mat);
-      planetMesh.position.copy(posLY);
       planetMesh.userData = { planetData: planet, type: 'planet', displayRadius: radiusLY };
       const tilt = planet.id === 'saturn' ? 26.7 : planet.id === 'uranus' ? 97.8 : planet.id === 'earth' ? 23.4 : planet.id === 'mars' ? 25.2 : 3;
       planetMesh.rotation.z = THREE.MathUtils.degToRad(tilt);
       this.group.add(planetMesh);
 
       // Saturn Rings
-      if (planet.id === 'saturn') {
-        const sun = posLY.clone().negate().normalize()
-          .applyQuaternion(planetMesh.quaternion.clone().invert())
-          .applyAxisAngle(new THREE.Vector3(1,0,0), Math.PI / 2);
-        const ringMesh = createSaturnRings(radiusLY, sun);
-        ringMesh.userData = { planetData: planet, type: 'planet' };
-        planetMesh.add(ringMesh);
+      const rings = planet.id === 'saturn' ? createSaturnRings(radiusLY) : undefined;
+      if (rings) {
+        rings.userData = { planetData: planet, type: 'planet' };
+        planetMesh.add(rings);
       }
 
       // 2. Calculate true tilted orbital path points in AU -> convert to LY
@@ -116,17 +121,17 @@ export class SolSystemRenderer {
       this.planetsMap.set(planet.id, {
         data: planet,
         mesh: planetMesh,
-        orbitLine
+        orbitLine,
+        rings
       });
     });
 
-    this.setPlaneAlignment(this.alignment);
-    console.log(`🪐 [SolSystemRenderer] Real-time planet positions generated for all 9 planets.`);
+    this.updateDate(currentDate);
   }
 
   public animate(timeSec: number) {
     this.planetsMap.forEach(planet => {
-      (planet.mesh.material as THREE.ShaderMaterial).uniforms.uTime.value = timeSec;
+      planet.mesh.material.uniforms.uTime.value = timeSec;
     });
   }
 }

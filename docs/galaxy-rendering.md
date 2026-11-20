@@ -163,9 +163,13 @@ is a measured planetary map or rotational ephemeris.
 
 Planet navigation and non-overlapping labels open a sunlit inspection view with
 diameter, orbital period, inclination and current computed heliocentric distance.
-Positions use the existing orbital elements; visual radii are enlarged and
-compressed in ratio for legibility, explicitly noted in the UI. Pluto is labelled
-as a dwarf planet. Background star labels are suppressed at planetary scale.
+The date in the Solar System bar opens the UTC date and playback controls. The
+clock starts paused at the present date. Play advances the approximate Keplerian
+orbits at the selected number of days per second. Today pauses at the present
+date. Planet positions, illumination, Saturn’s ring shadow and the inspection
+camera update as the date changes. Visual radii are enlarged and compressed in
+ratio for legibility. Pluto is labelled as a dwarf planet. Background star
+labels are suppressed at planetary scale.
 
 ## Validation
 

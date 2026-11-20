@@ -39,6 +39,9 @@ const MIN_CAMERA_RADIUS = 0.0000000001;
 const MAX_CAMERA_RADIUS = 2500000;
 const SOL_CAMERA_RADIUS = 0.0003; // ~19 AU: close view of the planetary system.
 const SKY_CAMERA_RADIUS = 0.01;
+const MILLISECONDS_PER_DAY = 86_400_000;
+const MIN_SIMULATION_TIME = Date.parse('0001-01-01T00:00:00Z');
+const MAX_SIMULATION_TIME = Date.parse('9999-12-31T23:59:59.999Z');
 
 export class SpaceEngine {
   public scene: THREE.Scene;
@@ -95,6 +98,9 @@ export class SpaceEngine {
   public onStateChange?: () => void;
 
   private clock: THREE.Clock;
+  private simulationTime = Date.now();
+  private isSimulationPlaying = false;
+  private simulatedDaysPerSecond = 7;
   private animationFrameId: number | null = null;
   private disposed = false;
   private eventController = new AbortController();
@@ -152,7 +158,7 @@ export class SpaceEngine {
     this.constellationRenderer = new ConstellationRenderer();
     this.scene.add(this.constellationRenderer.group);
 
-    this.solSystemRenderer = new SolSystemRenderer();
+    this.solSystemRenderer = new SolSystemRenderer(this.simulationDate);
     this.scene.add(this.solSystemRenderer.group);
 
     this.deepSpaceRenderer = new DeepSpaceRenderer();
@@ -308,6 +314,49 @@ export class SpaceEngine {
     this.starRenderer.updateStars(this.viewMode, this.planeAlignment, filter);
     this.constellationRenderer.updateConstellations(this.starRenderer, this.viewMode, this.planeAlignment);
     this.onStateChange?.();
+  }
+
+  public get simulationDate() { return new Date(this.simulationTime); }
+  public get simulationPlaying() { return this.isSimulationPlaying; }
+  public get simulationSpeed() { return this.simulatedDaysPerSecond; }
+
+  public setSimulationDate(date: Date) {
+    const time = date.getTime();
+    if (!Number.isFinite(time)) return;
+    this.updateSimulationTime(THREE.MathUtils.clamp(time, MIN_SIMULATION_TIME, MAX_SIMULATION_TIME));
+    this.updateCameraPosition();
+    this.onStateChange?.();
+  }
+
+  public setSimulationPlaying(playing: boolean) {
+    this.isSimulationPlaying = playing && this.simulationTime < MAX_SIMULATION_TIME;
+    this.onStateChange?.();
+  }
+
+  public setSimulationSpeed(daysPerSecond: number) {
+    if (!Number.isFinite(daysPerSecond) || daysPerSecond <= 0) return;
+    this.simulatedDaysPerSecond = daysPerSecond;
+    this.onStateChange?.();
+  }
+
+  private advanceSimulation(seconds: number) {
+    if (!this.simulationPlaying || seconds <= 0) return;
+    const time = Math.min(MAX_SIMULATION_TIME, this.simulationTime + seconds * this.simulationSpeed * MILLISECONDS_PER_DAY);
+    this.updateSimulationTime(time);
+    if (time === MAX_SIMULATION_TIME) this.setSimulationPlaying(false);
+  }
+
+  private updateSimulationTime(time: number) {
+    if (time === this.simulationTime) return;
+    const planet = this.focusedPlanetId ? this.solSystemRenderer.planetsMap.get(this.focusedPlanetId) : undefined;
+    const previous = planet?.mesh.getWorldPosition(new THREE.Vector3());
+    this.simulationTime = time;
+    this.solSystemRenderer.updateDate(this.simulationDate);
+    if (planet && previous) {
+      const shift = planet.mesh.getWorldPosition(new THREE.Vector3()).sub(previous);
+      this.cameraTarget.add(shift);
+      this.targetCameraTarget.add(shift);
+    }
   }
 
   /** Resolve by identity at action time; never reuse coordinates from an old view. */
@@ -721,9 +770,11 @@ export class SpaceEngine {
   private animate = () => {
     if (this.disposed) return;
     this.animationFrameId = requestAnimationFrame(this.animate);
+    const deltaSeconds = this.clock.getDelta();
     if (this.renderer.getContext().isContextLost()) return;
 
-    const elapsedTime = this.clock.getElapsedTime();
+    const elapsedTime = this.clock.elapsedTime;
+    this.advanceSimulation(deltaSeconds);
 
     // Smooth Camera Transition Interpolation (Glide Ease-Out)
     if (!this.isDragging) {

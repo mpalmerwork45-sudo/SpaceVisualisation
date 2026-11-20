@@ -54,6 +54,7 @@ export class UIManager {
       this.planetLabelOverlay.updateLabels();
       document.getElementById('planet-nav')!.hidden = !this.engine.solSystemRenderer.group.visible;
       this.updateOrientationTelemetry();
+      if (this.engine.simulationPlaying) this.updateSimulationReadout();
     };
   }
 
@@ -105,6 +106,18 @@ export class UIManager {
             <button id="btn-view-sol" class="btn-preset active" title="Close Solar System view centred on Sol, facing the Galactic centre">
               ☀️ Sol Planetary Zoom
             </button>
+          </div>
+
+          <div class="control-group simulation-controls">
+            <label class="group-label" for="simulation-date">Orbit date (UTC)</label>
+            <input type="date" id="simulation-date" min="0001-01-01" max="9999-12-31" />
+            <button id="simulation-play" class="btn-icon" type="button">Play</button>
+            <label class="simulation-rate" for="simulation-speed">Days/sec</label>
+            <select id="simulation-speed">
+              <option value="1">1</option><option value="7">7</option>
+              <option value="30">30</option><option value="365">365</option>
+            </select>
+            <button id="simulation-today" class="btn-icon" type="button">Today</button>
           </div>
 
           <!-- TOGGLES -->
@@ -198,7 +211,11 @@ export class UIManager {
 
       <!-- SPECTRAL FILTER BAR -->
       <nav class="planet-nav" id="planet-nav" aria-label="Explore the Solar System">
-        <div class="planet-nav-heading"><span>SOLAR SYSTEM</span><small>Positions to scale · bodies enlarged</small></div>
+        <div class="planet-nav-heading">
+          <span>Solar System</span>
+          <button id="btn-orbit-date" type="button" aria-label="Set orbital date and playback"><time id="orbit-date"></time></button>
+          <small>Positions to scale · bodies enlarged</small>
+        </div>
         <div class="planet-nav-items">
           ${PLANET_EPHEMERIS.map((planet, index) => `<button class="planet-stop" data-planet="${planet.id}" style="--planet-colour:${planet.color}" title="Inspect ${planet.name}">
             <span class="planet-swatch planet-swatch-${planet.id}"></span><span>${planet.name}</span><small>${String(index + 1).padStart(2,'0')}</small>
@@ -292,6 +309,28 @@ export class UIManager {
     exposure.textContent = enhanced ? '📷 Enhanced Exposure' : '🌙 Eye Exposure';
     exposure.classList.toggle('active', enhanced);
     exposure.setAttribute('aria-pressed', String(enhanced));
+    const playButton = document.getElementById('simulation-play')!;
+    playButton.textContent = this.engine.simulationPlaying ? 'Pause' : 'Play';
+    playButton.classList.toggle('active', this.engine.simulationPlaying);
+    (document.getElementById('simulation-speed') as HTMLSelectElement).value = String(this.engine.simulationSpeed);
+    this.updateSimulationReadout();
+  }
+
+  private updateSimulationReadout() {
+    const date = this.engine.simulationDate.toISOString().slice(0, 10);
+    const input = document.getElementById('simulation-date') as HTMLInputElement;
+    if (input !== document.activeElement && input.value !== date) input.value = date;
+    const clock = document.getElementById('orbit-date') as HTMLTimeElement;
+    if (clock.dateTime !== date) {
+      clock.dateTime = date;
+      clock.textContent = date;
+    }
+    const distance = this.modalElem.querySelector<HTMLElement>('[data-planet-distance]');
+    const planet = distance && this.engine.solSystemRenderer.planetsMap.get(distance.dataset.planetDistance!);
+    if (distance && planet) {
+      const value = planetDistance(planet.mesh.position);
+      if (distance.textContent !== value) distance.textContent = value;
+    }
   }
 
   private bindUIEvents() {
@@ -367,6 +406,24 @@ export class UIManager {
       this.engine.setPresetViewpoint('sol_center');
       btnPlaneAlign.textContent = '🪐 Plane: Ecliptic';
       syncRingsCheckbox(false);
+    });
+
+    const simulationDate = document.getElementById('simulation-date') as HTMLInputElement;
+    simulationDate.addEventListener('change', () => {
+      if (simulationDate.validity.valid) this.engine.setSimulationDate(new Date(simulationDate.valueAsNumber));
+    });
+    simulationDate.addEventListener('blur', () => this.updateSimulationReadout());
+    document.getElementById('btn-orbit-date')!.addEventListener('click', () => {
+      (document.getElementById('navigation-options') as HTMLDetailsElement).open = true;
+      simulationDate.focus();
+    });
+    document.getElementById('simulation-play')!.addEventListener('click', () => this.engine.setSimulationPlaying(!this.engine.simulationPlaying));
+    document.getElementById('simulation-speed')!.addEventListener('change', event => {
+      this.engine.setSimulationSpeed(Number((event.currentTarget as HTMLSelectElement).value));
+    });
+    document.getElementById('simulation-today')!.addEventListener('click', () => {
+      this.engine.setSimulationPlaying(false);
+      this.engine.setSimulationDate(new Date());
     });
 
     // SINGLE AXIS TILT HUD BUTTON EVENTS
@@ -657,7 +714,7 @@ export class UIManager {
         <p class="modal-description">${appearance.summary}</p>
         <div class="modal-grid">
           ${stat('Diameter', `${Math.round(data.radiusKm * 2).toLocaleString()} km`)}
-          ${stat('Distance from Sun', planetDistance(position))}
+          <div class="stat-box"><span class="stat-label">Distance from Sun</span><span class="stat-value" data-planet-distance="${data.id}">${planetDistance(position)}</span></div>
           ${stat('Orbital period', period)}
           ${stat('Orbital inclination', `${data.i.toFixed(2)}°`)}
         </div>

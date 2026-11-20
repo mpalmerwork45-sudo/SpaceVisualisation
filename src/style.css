@@ -127,6 +127,9 @@ canvas {
 .planet-nav-heading { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
 .planet-nav-heading > span { font-size: 10px; letter-spacing: 0.18em; color: #bccbda; }
 .planet-nav-heading small { font-size: 10px; color: #8193a6; }
+#btn-orbit-date { color: #bccbda; font: inherit; font-size: 10px; font-variant-numeric: tabular-nums; background: none; border: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.simulation-controls input, .simulation-controls select { min-width: 0; padding: 5px; font: inherit; font-size: 12px; color-scheme: dark; background: #111b29; color: var(--text-main); border: 1px solid #71859b50; border-radius: 5px; }
+.simulation-rate { font-size: 11px; color: var(--text-muted); }
 .planet-nav-items { display: flex; gap: 5px; overflow-x: auto; }
 .planet-stop { flex: 1; min-width: 67px; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 8px; padding: 7px 5px; background: transparent; color: #c7d2e0; cursor: pointer; font: inherit; font-size: 11px; }
 .planet-stop:hover, .planet-stop.active { border-color: var(--planet-colour); background: rgba(150,170,195,0.09); }

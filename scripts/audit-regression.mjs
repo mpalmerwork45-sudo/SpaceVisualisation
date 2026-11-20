@@ -333,6 +333,49 @@ try {
     return { previouslyAllocated, before, after, rebuilds: 5 };
   });
 
+  results.orbitalClock = await page.evaluate(() => {
+    const e = engine;
+    click('btn-view-sol');
+    search('Earth'); snap();
+    const date = document.getElementById('simulation-date');
+    const setDate = value => {
+      date.value = value;
+      date.dispatchEvent(new Event('change', {bubbles:true}));
+    };
+    click('btn-orbit-date');
+    check(document.activeElement === date, 'the Solar System date opens its controls from planet navigation');
+    setDate('2024-01-04');
+    const earth = e.solSystemRenderer.planetsMap.get('earth');
+    const first = earth.mesh.getWorldPosition(new THREE.Vector3());
+    const offset = e.camera.position.clone().sub(first);
+    const distance = document.querySelector('[data-planet-distance="earth"]');
+    const januaryDistance = distance.textContent;
+    setDate('2024-07-04');
+    const second = earth.mesh.getWorldPosition(new THREE.Vector3());
+    const julyDistance = distance.textContent;
+    check(first.distanceTo(second) * 63241.077 > 1.9, 'changing the date moves Earth along its orbit');
+    check(e.camera.position.clone().sub(second).distanceTo(offset) < 1e-12, 'the inspection camera follows Earth as the date changes');
+    check(januaryDistance !== julyDistance && document.getElementById('orbit-date').dateTime === '2024-07-04', 'the open panel and orbital date reflect the chosen epoch');
+    check(e.solSystemRenderer.planetsMap.get('earth') === earth, 'date changes reuse existing planet meshes');
+    date.blur();
+    const speed = document.getElementById('simulation-speed');
+    speed.value = '30';
+    speed.dispatchEvent(new Event('change', {bubbles:true}));
+    const start = e.simulationDate.getTime();
+    click('simulation-play');
+    e.advanceSimulation(.5); snap();
+    const played = e.simulationDate.getTime();
+    check(played - start === 15 * 86400000 && date.value === '2024-07-19', 'playback advances at the selected speed');
+    click('simulation-play');
+    e.advanceSimulation(1);
+    check(e.simulationDate.getTime() === played, 'Pause holds the simulation date');
+    click('simulation-today');
+    check(Math.abs(Date.now() - e.simulationDate.getTime()) < 2000, 'Today returns to the present date');
+    document.getElementById('navigation-options').open = false;
+    click('btn-close-modal'); click('btn-view-sol'); snap();
+    return { januaryDistance, julyDistance };
+  });
+
   results.context = await page.evaluate(async () => {
     engine.setPresetViewpoint('realistic_sky');
     engine.setPlaneAlignment('galactic');
