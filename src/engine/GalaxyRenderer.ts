@@ -8,6 +8,7 @@ import { meanSurfaceBrightnessMagArcsec2, surfaceBrightnessFlux } from '../utils
 import type { PlaneAlignment } from './StarRenderer';
 import { RADIATIVE_TRANSFER_GLSL } from './RadiativeTransfer';
 import { createGalaxyDisc } from './GalaxyDisc';
+import { createAndromedaDust } from './AndromedaDust';
 
 export interface RenderedGalaxyNode {
   data: DeepSpaceObjectData;
@@ -35,6 +36,8 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
   uniform float uBulgeFraction;
   uniform float uSersicIndex;
   uniform sampler2D uDisc;
+  uniform sampler2D uDustAtlas;
+  uniform bool uUseDustAtlas;
   uniform float uDiscHeight;
   uniform float uDustOpacity;
   uniform float uPhotometricFlux;
@@ -90,7 +93,8 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
       float sampleIndex = float(i) + 0.5;
       vec3 samplePosition = start + sampleIndex * stepVector;
       vec3 p = samplePosition * scale;
-      vec2 dx = uvDx + sampleIndex * stepDx, dy = uvDy + sampleIndex * stepDy;
+      vec2 pixelDx = uvDx + sampleIndex * stepDx, dy = uvDy + sampleIndex * stepDy;
+      vec2 dx = pixelDx;
       // Filter both the projected pixel and the length of disc crossed by
       // this step, so compact associations blend smoothly at a distance.
       if (dot(stepUV, stepUV) > max(dot(dx, dx), dot(dy, dy))) dx = stepUV;
@@ -103,13 +107,38 @@ const GALAXY_FRAGMENT_SHADER = /* glsl */ `
       float bulge = 1.60 * exp(-bn * (pow(max(bulgeRadius / bulgeScale, 0.002), 1.0 / n) - 1.0));
       float old = columns.r * layerDensity(z, dz, uDiscHeight) * 1.35;
       float youngLayer = layerDensity(z, dz, uDiscHeight * 0.13);
-      float young = columns.g * youngLayer * 1.65;
-      float ionized = columns.a * youngLayer * 1.2;
-      float dust = uDustOpacity * columns.b * layerDensity(z, dz, uDiscHeight * 0.20) * 2.1;
+      float youngColumn = columns.g, ionizedColumn = columns.a;
+      float dust = uDustOpacity * columns.b * layerDensity(z, dz, uDiscHeight * 0.20) * 2.1 * envelope;
+      if (uUseDustAtlas) {
+        const float height = 0.006;
+        // A segment can traverse many texels yet cross the thin layer in
+        // only part of the segment. Sample the patch closest to the plane.
+        float crossing = dz > height ? clamp(-p.z / (stepVector.z * uDepthRatio), -0.5, 0.5) : 0.0;
+        vec2 uv = firstUV + (sampleIndex + crossing) * stepUV;
+        vec2 footprint = stepUV * min(1.0, 3.0 * height / max(dz, height));
+        vec2 surveyDx = dot(footprint, footprint) > max(dot(pixelDx, pixelDx), dot(dy, dy)) ? footprint : pixelDx;
+        vec2 survey = textureGrad(uDustAtlas, uv, surveyDx, dy).rg;
+        // A face-on optical depth is the integral of density normal to the
+        // disc. Normalize the inferred vertical profile inside the finite mesh.
+        float halfDepth = uDepthRatio * sqrt(max(0.0, 1.0 - dot(p.xy, p.xy)));
+        float massInMesh = max(0.0001, 1.0 - exp(-halfDepth / height));
+        dust = (1.0 - survey.g) * dust + survey.r * layerDensity(p.z, dz, height) / massInMesh;
+        // Give illustrative young associations a measured large-scale anchor.
+        // Place them by nearby dusty gas with a small outward displacement;
+        // their individual stars and colours are not survey measurements.
+        vec2 innerUV = uv - 0.008 * p.xy / max(length(p.xy), 0.1);
+        vec2 cloud = textureGrad(uDustAtlas, innerUV, surveyDx, dy).rg;
+        float gas = cloud.r / max(cloud.g, 0.001);
+        float association = (1.0 - exp(-4.0 * max(0.0, gas - 0.036))) * (0.30 + 0.20 * columns.g);
+        youngColumn = mix(youngColumn, association, cloud.g);
+        ionizedColumn = mix(ionizedColumn, association * (0.03 + 0.31 * columns.a), cloud.g);
+      }
+      float young = youngColumn * youngLayer * 1.65;
+      float ionized = ionizedColumn * youngLayer * 1.2;
       float stars = (1.0 - uBulgeFraction) * (old + young) + uBulgeFraction * bulge;
       vec3 emissivity = (1.0 - uBulgeFraction) * (oldColour * old + youngColour * young
         + vec3(1.0, 0.20, 0.28) * ionized) + oldColour * uBulgeFraction * bulge;
-      vec3 tau = (vec3(0.72, 1.0, 1.32) * dust + 0.17 * stars) * envelope * path;
+      vec3 tau = (vec3(0.72, 1.0, 1.32) * dust + 0.17 * stars * envelope) * path;
       light += transmission * emissivity * envelope * path * emissionIntegral(tau);
       transmission *= exp(-tau);
       if (max(transmission.r, max(transmission.g, transmission.b)) < 0.004) break;
@@ -139,6 +168,10 @@ export class GalaxyRenderer {
   public readonly nodes = new Map<string, RenderedGalaxyNode>();
   private readonly volumeGeometry = new THREE.SphereGeometry(1, 40, 28);
   private readonly discs = new Map<DeepSpaceObjectData, THREE.DataTexture>();
+  private readonly dustAtlas = { value: null as THREE.DataTexture | null };
+  private readonly useDustAtlas = { value: false };
+  private dustRequest: AbortController | null = null;
+  private retryDustAfter = 0;
   private exposure = 0.72;
 
   public setExposure(exposure: number) {
@@ -159,6 +192,10 @@ export class GalaxyRenderer {
 
   public dispose() {
     this.clear();
+    this.dustRequest?.abort();
+    this.dustAtlas.value?.dispose();
+    this.dustAtlas.value = null;
+    this.useDustAtlas.value = false;
     this.volumeGeometry.dispose();
     for (const disc of this.discs.values()) disc.dispose();
     this.discs.clear();
@@ -187,7 +224,13 @@ export class GalaxyRenderer {
       mesh = new THREE.Mesh(this.volumeGeometry, this.createMaterial(dso, appearance, depthRatio));
       mesh.scale.set(radius, radius, radius * depthRatio);
       mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(major, minor, normal));
-      mesh.rotateX(inclination);
+      // The catalogue minor axis points southeast. For M31 the northwest
+      // side is nearer Sol, so the positive minor axis tips away from us.
+      mesh.rotateX(dso.id === 'andromeda_m31' ? -inclination : inclination);
+      if (dso.id === 'andromeda_m31' && typeof window !== 'undefined') {
+        this.loadAndromedaDust();
+        mesh.onBeforeRender = () => this.loadAndromedaDust();
+      }
     } else {
       const radius = Math.max(0.05, angularDiameterToWorldSize(dso.angularSizeArcmin, distance) * 0.5);
       mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 8), new THREE.MeshBasicMaterial({
@@ -200,6 +243,24 @@ export class GalaxyRenderer {
     const node = { data: dso, position: position.clone(), mesh };
     this.nodes.set(dso.id, node);
     return node;
+  }
+
+  private loadAndromedaDust() {
+    if (this.dustAtlas.value || this.dustRequest || performance.now() < this.retryDustAfter) return;
+    const request = new AbortController();
+    this.dustRequest = request;
+    fetch(import.meta.env.BASE_URL + 'data/andromeda-dust.bin', { signal: request.signal })
+      .then(response => {
+        if (!response.ok) throw new Error('M31 dust atlas HTTP ' + response.status);
+        return response.arrayBuffer();
+      })
+      .then(buffer => {
+        if (request.signal.aborted) return;
+        this.dustAtlas.value = createAndromedaDust(buffer);
+        this.useDustAtlas.value = true;
+      })
+      .catch(() => { if (!request.signal.aborted) this.retryDustAfter = performance.now() + 15000; })
+      .finally(() => { if (this.dustRequest === request) this.dustRequest = null; });
   }
 
   private createMaterial(dso: DeepSpaceObjectData, appearance: GalaxyAppearance, depthRatio: number) {
@@ -224,6 +285,8 @@ export class GalaxyRenderer {
         uBulgeFraction: { value: appearance.bulgeFraction },
         uSersicIndex: { value: appearance.sersicIndex },
         uDisc: { value: disc },
+        uDustAtlas: dso.id === 'andromeda_m31' ? this.dustAtlas : { value: null },
+        uUseDustAtlas: dso.id === 'andromeda_m31' ? this.useDustAtlas : { value: false },
         uDiscHeight: { value: discHeight },
         uDustOpacity: { value: appearance.dustOpacity },
         uPhotometricFlux: { value: flux },
