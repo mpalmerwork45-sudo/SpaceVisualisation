@@ -11,14 +11,3 @@ export function selectableObjects(roots: THREE.Object3D[]): THREE.Object3D[] {
   }
   return objects;
 }
-
-export function isSelectableHit(hit: THREE.Intersection): boolean {
-  const mesh = hit.object;
-  if (mesh instanceof THREE.Mesh && mesh.userData.deepObjectData?.galaxy && hit.uv) {
-    // Same hard footprint as the analytic galaxy shader, rather than the
-    // enclosing quad's transparent corners.
-    const x = hit.uv.x * 2 - 1, y = hit.uv.y * 2 - 1;
-    if (x*x + y*y > 1) return false;
-  }
-  return true;
-}

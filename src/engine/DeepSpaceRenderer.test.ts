@@ -4,7 +4,7 @@ import { DeepSpaceRenderer } from './DeepSpaceRenderer';
 import { angularDiameterToWorldSize } from '../utils/coordinates';
 
 describe('deep-space volumes', () => {
-  it('renders galaxies once, with a disc axis ratio independent of the bulge footprint', () => {
+  it('renders one inclined galaxy volume with the catalogue’s projected major and minor extents', () => {
     const renderer = new DeepSpaceRenderer();
     renderer.setExposure(1.45);
     renderer.updateDeepSpace('realistic','galactic');
@@ -14,10 +14,16 @@ describe('deep-space volumes', () => {
     expect(meshes).toHaveLength(1);
     const mesh = meshes[0], material = mesh.material as THREE.ShaderMaterial;
     const appearance = node.data.galaxy!;
-    expect(mesh.scale.x).toBeCloseTo(angularDiameterToWorldSize(appearance.majorArcmin,1200),8);
+    expect(mesh.geometry).toBeInstanceOf(THREE.SphereGeometry);
+    expect(mesh.scale.x * 2).toBeCloseTo(angularDiameterToWorldSize(appearance.majorArcmin,1200),8);
     expect(mesh.scale.y).toBe(mesh.scale.x);
-    expect(material.uniforms.uAxisRatio.value).toBeCloseTo(
-      angularDiameterToWorldSize(appearance.minorArcmin,1200) / mesh.scale.x,8);
+    const lineOfSight = node.position.clone().normalize().negate();
+    const normal = new THREE.Vector3(0,0,1).applyQuaternion(mesh.quaternion);
+    const angle = normal.angleTo(lineOfSight);
+    expect(THREE.MathUtils.radToDeg(angle)).toBeCloseTo(appearance.inclinationDeg,8);
+    const projectedMinor = 2 * Math.hypot(mesh.scale.y * Math.cos(angle), mesh.scale.z * Math.sin(angle));
+    expect(projectedMinor).toBeCloseTo(angularDiameterToWorldSize(appearance.minorArcmin,1200),8);
+    expect(mesh.scale.z).toBeLessThan(mesh.scale.x);
     expect(material.uniforms.uExposure.value).toBe(1.45);
     renderer.dispose();
   });

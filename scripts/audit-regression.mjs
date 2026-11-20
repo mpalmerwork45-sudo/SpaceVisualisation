@@ -202,14 +202,20 @@ try {
   results.picking = await page.evaluate(() => {
     const e = engine;
     const node = e.deepSpaceRenderer.objectsMap.get('andromeda_m31');
-    const mesh = node.mesh.children[0]; e.scene.updateMatrixWorld(true);
-    const corner = mesh.localToWorld(new THREE.Vector3(.49,.49,0));
+    const mesh = node.mesh; e.scene.updateMatrixWorld(true);
+    const major = new THREE.Vector3(1,0,0).applyQuaternion(mesh.quaternion);
+    const minor = major.clone().cross(node.position.clone().normalize());
+    const catalogueMinorRadius = coords.angularDiameterToWorldSize(node.data.galaxy.minorArcmin, node.position.length()) * 0.5;
+    const corner = node.position.clone().addScaledVector(major, mesh.scale.x * .95).addScaledVector(minor, catalogueMinorRadius * .95);
     e.camera.position.set(0,0,0); e.camera.lookAt(corner); e.camera.updateMatrixWorld(true); e.mouse.set(0,0);
     let selected = null;
     const original = e.onSelectObject;
     e.onSelectObject = value => { selected = value; };
     e.checkClick();
-    check(selected?.data.id !== 'andromeda_m31','5: transparent galaxy corners are not selectable');
+    check(selected?.data.id !== 'andromeda_m31','5: directions outside the projected galaxy volume are not selectable');
+    e.camera.lookAt(node.position); e.camera.updateMatrixWorld(true);
+    e.checkClick();
+    check(selected?.data.id === 'andromeda_m31','the centre of the galaxy volume is selectable');
     click('btn-view-sol'); snap();
     e.solSystemRenderer.group.visible = false; e.scene.updateMatrixWorld(true);
     const position = e.solSystemRenderer.planetsMap.get('jupiter').mesh.getWorldPosition(new THREE.Vector3()).project(e.camera);
@@ -415,6 +421,60 @@ try {
       return { sol, offset, log };
     } finally {
       field.dispose();
+    }
+  });
+
+  results.galaxyVolume = await page.evaluate(async () => {
+    const { DeepSpaceRenderer } = await import('/src/engine/DeepSpaceRenderer.ts');
+    const deepSpace = new DeepSpaceRenderer();
+    deepSpace.setExposure(1.45);
+    deepSpace.updateDeepSpace('linear', 'galactic');
+    const galaxy = deepSpace.objectsMap.get('andromeda_m31').mesh;
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0);
+    scene.add(galaxy);
+    const camera = new THREE.PerspectiveCamera(46, 1, 1, 1e8);
+    const size = 160;
+    const target = new THREE.WebGLRenderTarget(size, size);
+    const pixels = new Uint8Array(size * size * 4);
+    const renderer = engine.renderer;
+    const previousTarget = renderer.getRenderTarget();
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(galaxy.quaternion);
+    const discAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(galaxy.quaternion);
+    const measureView = (direction, up, radius) => {
+      camera.position.copy(galaxy.position).addScaledVector(direction, radius * galaxy.scale.x);
+      camera.up.copy(up);
+      camera.lookAt(galaxy.position);
+      deepSpace.animate(0, camera, 'linear');
+      renderer.setRenderTarget(target);
+      renderer.render(scene, camera);
+      renderer.readRenderTargetPixels(target, 0, 0, size, size, pixels);
+      let height = 0, litPixels = 0;
+      for (let y = 0; y < size; y++) {
+        let litRow = false;
+        for (let x = 0; x < size; x++) {
+          const index = 4 * (y * size + x);
+          if (pixels[index] + pixels[index + 1] + pixels[index + 2] > 12) {
+            litPixels++;
+            litRow = true;
+          }
+        }
+        if (litRow) height++;
+      }
+      return { height, litPixels };
+    };
+    try {
+      const faceOn = measureView(normal, discAxis, 2.8);
+      const edgeOn = measureView(discAxis, normal, 2.8);
+      const interior = measureView(discAxis, normal, 0.15);
+      check(faceOn.litPixels > 200 && edgeOn.litPixels > 100 && faceOn.height > edgeOn.height * 1.4,
+        'Andromeda renders a broader face-on disc and a thinner edge-on profile');
+      check(interior.litPixels > 100, 'galaxy ray integration works for an observer inside the volume');
+      return { faceOn, edgeOn, interior };
+    } finally {
+      renderer.setRenderTarget(previousTarget);
+      target.dispose();
+      deepSpace.dispose();
     }
   });
 

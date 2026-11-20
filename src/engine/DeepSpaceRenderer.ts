@@ -23,7 +23,6 @@ export class DeepSpaceRenderer {
     this.group = new THREE.Group();
     this.galaxyRenderer = new GalaxyRenderer();
     this.group.add(this.galaxyRenderer.group);
-    console.log('🌌 [DeepSpaceRenderer] Using angularly sized analytic galaxy surfaces.');
   }
 
   public updateDeepSpace(viewMode: ViewMode, planeAlignment: PlaneAlignment) {
@@ -67,19 +66,18 @@ export class DeepSpaceRenderer {
     this.exposure = exposure;
     this.galaxyRenderer.setExposure(exposure);
     this.objectsMap.forEach(node => {
-      if (node.mesh instanceof THREE.Mesh && node.mesh.material instanceof THREE.ShaderMaterial) {
+      if (node.data.type !== 'galaxy' && node.mesh instanceof THREE.Mesh && node.mesh.material instanceof THREE.ShaderMaterial) {
         node.mesh.material.uniforms.uExposure.value = exposure;
       }
     });
   }
 
-  public animate(_timeSec: number, camera?: THREE.PerspectiveCamera, viewMode: ViewMode = 'linear') {
+  public animate(_timeSec: number, camera?: THREE.PerspectiveCamera, _viewMode: ViewMode = 'linear') {
     if (camera) {
       this.objectsMap.forEach(node => {
         if (node.mesh instanceof THREE.Mesh && node.mesh.material instanceof THREE.ShaderMaterial) {
-          node.mesh.updateWorldMatrix(true,false);
-          node.mesh.material.uniforms.uCamera.value.copy(camera.position);
-          node.mesh.worldToLocal(node.mesh.material.uniforms.uCamera.value);
+          const observer = node.mesh.material.uniforms.uCamera.value as THREE.Vector3;
+          node.mesh.worldToLocal(observer.copy(camera.position));
         }
       });
     }
@@ -113,14 +111,5 @@ export class DeepSpaceRenderer {
         }
       });
     });
-  }
-
-  private seededRandom(id: string): () => number {
-    let state = 2166136261;
-    for (let i = 0; i < id.length; i++) state = Math.imul(state ^ id.charCodeAt(i), 16777619);
-    return () => {
-      state = Math.imul(state ^ (state >>> 13), 1274126177);
-      return ((state >>> 0) % 100000) / 100000;
-    };
   }
 }

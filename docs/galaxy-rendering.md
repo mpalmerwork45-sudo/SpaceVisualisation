@@ -1,7 +1,7 @@
 # Galaxy rendering notes
 
-The renderer treats a galaxy as an extended celestial source rather than as a
-random cloud of point particles.
+The renderer treats a galaxy as an extended celestial source with depth,
+stellar emission and dust absorption.
 
 ## Coordinate and angular model
 
@@ -15,9 +15,8 @@ random cloud of point particles.
   observer position, preserving the orbit anchor, radius, frame and field of view.
 - Ecliptic alignment uses the J2000 obliquity (23.439281°) with the renderer's
   `+Y = north` convention.
-- Each galaxy gets an orthonormal tangent frame. Its major axis is the
-  catalogue position angle, measured east of celestial north; the minor axis
-  is the perpendicular tangent direction.
+- Each galaxy’s disc is inclined in a tangent frame whose major axis follows the
+  catalogue position angle, measured east of celestial north.
 - In the realistic sky mode the image diameter is
   `2 * R * tan(apparent_diameter / 2)`, so changing the shell radius does not
   change an object's apparent angular size.
@@ -31,23 +30,23 @@ catalogue values are deliberately explicit and test their physical
 diameter/distance consistency; they are suitable visual inputs, not a claim
 that every isophotal definition is identical across surveys.
 
-The shader combines:
+The shader integrates along the sightline through an inclined ellipsoid. The
+observed minor-to-major axis ratio and inclination set its polar depth. The
+volume includes these components.
 
-- a Sérsic-like bulge,
-- an exponential disk,
-- logarithmic spiral arms for spiral/barred spiral morphologies,
-- a deterministic value-noise field for irregular structure,
-- an optical-depth dust lane (`exp(-tau)`), and
+- a Sérsic-like stellar bulge with a rounder profile than the disc
+- a flattened exponential stellar disc
+- logarithmic spiral arms and stellar bars where the morphology calls for them
+- deterministic density variations for clumps and irregular structure
+- a thinner absorbing dust layer
 - a mean surface-brightness scale derived from integrated V magnitude and the
-  catalogue's elliptical angular area.
+  catalogue's elliptical angular area
 
-It uses premultiplied alpha with normal blending. Integrated surface radiance
-is divided by coverage before the standard premultiply, avoiding the previous
-double attenuation of faint outskirts. The duplicate close-navigation plane
-has been removed: approaching a galaxy must not add another copy of its light.
-Disc coordinates are deprojected independently of the rounder stellar bulge.
-These remain analytic projected surfaces, not navigable 3D external galaxies;
-the surface-brightness scale is relative, not a calibrated instrument model.
+Each galaxy uses a single volume for angular and close orbital views. Ray
+integration uses the camera’s local position, including views from inside the
+volume. Presentation uses premultiplied alpha with relative surface brightness.
+These procedural models use catalogue extents and orientation with illustrative
+internal structure.
 
 ## Observation and asset pipeline
 
@@ -142,8 +141,8 @@ Planetary-nebula rims have clumped shell structure; their compact central
 illuminators use an analytic sightline profile instead of relying on a volume
 sample to happen to hit a sub-step-size star.
 
-Galaxy surfaces include multiscale stellar texture, clumped arm structure,
-offset dust lanes, extinction reddening and restrained star-forming knots.
+Galaxy volumes include clumped arms, extinction reddening and star-forming
+knots. Orbiting a galaxy changes the projected disc and dust lanes.
 Catalogue stars remain unresolved points when narrowing the field of view.
 Sky-object inspection can narrow below one degree to resolve compact nebulae.
 

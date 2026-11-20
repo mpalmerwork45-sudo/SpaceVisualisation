@@ -11,7 +11,7 @@ import { StarData, STARS_CATALOG } from '../data/stars';
 import { DeepSpaceObjectData } from '../data/deepSpace';
 import { ConstellationData, CONSTELLATIONS } from '../data/constellations';
 import type { KeplerianElements } from '../utils/ephemeris';
-import { isSelectableHit, selectableObjects } from './ObjectPicking';
+import { selectableObjects } from './ObjectPicking';
 
 interface SelectionData {
   star: StarData;
@@ -468,6 +468,9 @@ export class SpaceEngine {
     const selection = this.resolveSelection(type, id);
     if (!selection) return;
     this.frameObject(selection);
+    if (this.viewMode !== 'realistic' && selection.type === 'deepSpace' && selection.data.galaxy) {
+      this.setTargetViewDirection(selection.position);
+    }
     this.onStateChange?.();
   }
 
@@ -731,7 +734,6 @@ export class SpaceEngine {
     });
     hits.sort((a, b) => a.distance - b.distance);
     for (const hit of hits) {
-      if (!isSelectableHit(hit)) continue;
       if (star && star.distance < hit.distance) return this.resolveSelection('star', star.id);
       const info = hit.object.userData;
       const data = info.starData || info.planetData || info.deepObjectData || info.constellationData;
