@@ -32,6 +32,21 @@ html, body {
   position: relative;
 }
 
+.startup-error {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--bg-dark);
+}
+
+.startup-error[hidden] { display: none; }
+.startup-error > div { width: min(100%, 420px); }
+.startup-error h1 { font-size: clamp(21px, 5vw, 28px); }
+.startup-error p { margin: 12px 0 20px; line-height: 1.5; color: var(--text-muted); }
+
 #canvas-container {
   position: absolute;
   top: 0;

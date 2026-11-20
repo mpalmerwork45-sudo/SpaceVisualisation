@@ -11,6 +11,13 @@
       <div id="canvas-container"></div>
       <div id="labels-container"></div>
       <div id="ui-container"></div>
+      <section id="startup-error" class="startup-error" aria-labelledby="startup-error-title" hidden>
+        <div>
+          <h1 id="startup-error-title">The space visualizer couldn’t start</h1>
+          <p id="startup-error-message" role="alert"></p>
+          <button id="startup-retry" class="btn-action" type="button">Retry</button>
+        </div>
+      </section>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

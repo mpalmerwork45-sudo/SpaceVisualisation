@@ -360,7 +360,33 @@ try {
     results.layout.push(dimensions);
     if (width === 1280 || width === 390) { await page.evaluate(() => draw()); await page.screenshot({path:`${output}/solar-${width}.png`}); }
   }
+  const fallback = await browser.newPage({viewport:{width:390,height:844}});
+  try {
+    await fallback.addInitScript(() => {
+      if (sessionStorage.getItem('webgl-tested')) return;
+      sessionStorage.setItem('webgl-tested', '1');
+      const getContext = HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.getContext = function(kind, ...args) {
+        if (kind === 'webgl2' || kind === 'webgl') return null;
+        return getContext.call(this, kind, ...args);
+      };
+    });
+    await fallback.goto(process.env.AUDIT_URL || 'http://127.0.0.1:5179', {waitUntil:'domcontentloaded'});
+    await fallback.locator('#startup-error').waitFor({state:'visible'});
+    const message = await fallback.locator('#startup-error-message').innerText();
+    assert.match(message, /WebGL 2/);
+    await Promise.all([
+      fallback.waitForNavigation({waitUntil:'domcontentloaded'}),
+      fallback.getByRole('button', {name:'Retry'}).click()
+    ]);
+    await fallback.locator('#search-input').waitFor({state:'visible'});
+    assert.equal(await fallback.locator('#startup-error').isVisible(), false);
+    results.startupRecovery = {message, recovered:true};
+  } finally {
+    await fallback.close();
+  }
   results.checks = await page.evaluate(() => checks);
+  results.checks.push('WebGL startup failure shows a visible error and Retry restores the app');
   // Generic network console errors (fonts, favicon) do not represent JS/WebGL errors.
   const runtimeErrors = errors.filter(error => !error.includes('Failed to load resource'));
   assert.deepEqual(runtimeErrors,[],`Browser runtime errors: ${runtimeErrors.join('; ')}`);
