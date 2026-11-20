@@ -347,8 +347,10 @@ export class SpaceEngine {
     this.targetCameraRoll = 0;
     this.camera.up.set(0, 1, 0);
     if (external) {
-      this.aimOrbit(new THREE.Vector3(GALACTIC_CENTRE_KPC * LY_PER_KPC, 0, 0), 32 * LY_PER_KPC);
-      this.targetCameraFov = 39;
+      // Fit the 38 kpc disc to the shorter viewport dimension.
+      const distance = 32 * LY_PER_KPC / Math.min(1, this.camera.aspect);
+      this.aimOrbit(new THREE.Vector3(GALACTIC_CENTRE_KPC * LY_PER_KPC, 0, 0), distance);
+      this.targetCameraFov = 62;
       this.setTargetViewDirection(new THREE.Vector3(0, -1, 0));
     } else {
       const l = THREE.MathUtils.degToRad(view === 'coalsack' ? 302 : 78);

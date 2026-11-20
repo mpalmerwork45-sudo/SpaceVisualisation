@@ -10,7 +10,7 @@ export async function checkSurveySky(page, output) {
     check(await e.localDust.load(), 'the bundled local extinction volume loads');
     check(e.localDust.uniforms.uCloudsReady.value, 'both high-resolution 3D cloud patches are available');
     const { MilkyWayBackground } = await import('/src/engine/MilkyWayBackground.ts');
-    const { LY_PER_KPC } = await import('/src/engine/GalacticSkyModel.ts');
+    const { GALACTIC_CENTRE_KPC, LY_PER_KPC } = await import('/src/engine/GalacticSkyModel.ts');
     const { LOCAL_DUST_GLSL } = await import('/src/engine/LocalDustVolume.ts');
     const { StarFieldBackground } = await import('/src/engine/StarFieldBackground.ts');
     const { renderer } = e;
@@ -178,7 +178,7 @@ export async function checkSurveySky(page, output) {
       // CPU integration of the reprojected native survey for this framing gives r=0.1965.
       check(Math.abs(planckColumnR-0.1965) < 0.03, 'WebGL matches the registered local-survey and Planck column comparison');
 
-      pose(new THREE.Vector3(26700/LY_PER_KPC,32,0), new THREE.Vector3(0,-1,0), 39);
+      pose(new THREE.Vector3(GALACTIC_CENTRE_KPC,32,0), new THREE.Vector3(0,-1,0), 62);
       radiance(); renderer.render(scene, camera);
       panel(5, 'Milky Way from 32 kpc above the disc', renderer.domElement);
 

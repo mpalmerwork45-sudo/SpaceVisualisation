@@ -74,6 +74,13 @@ try {
       m.fragmentShader = ${JSON.stringify(fragment)};
       m.needsUpdate = true;
     }`);
+  } else {
+    await evaluate(`(async () => {
+      const dust = auditEngine.localDust;
+      if (!await dust.load() || !dust.uniforms.uCloudsReady.value) {
+        throw new Error('The Galactic dust surveys did not load');
+      }
+    })()`);
   }
   await screenshot('startup');
   const results = await evaluate(`(async () => {
