@@ -6,6 +6,7 @@ import { DeepSpaceRenderer } from './DeepSpaceRenderer';
 import { GridRenderer } from './GridRenderer';
 import { MilkyWayBackground, MilkyWayMode } from './MilkyWayBackground';
 import { StarFieldBackground } from './StarFieldBackground';
+import { LocalDustVolume } from './LocalDustVolume';
 import { angularDiameterToWorldSize, frameRotation, galacticFrameQuaternion, inwardViewDirection, orbitOffset, scaleDistance, viewDirectionToOrbitAngles, ViewMode } from '../utils/coordinates';
 import { StarData, STARS_CATALOG } from '../data/stars';
 import { DeepSpaceObjectData } from '../data/deepSpace';
@@ -70,6 +71,7 @@ export class SpaceEngine {
   public deepSpaceRenderer: DeepSpaceRenderer;
   public gridRenderer: GridRenderer;
   public milkyWay: MilkyWayBackground;
+  private readonly localDust = new LocalDustVolume();
   public starField: StarFieldBackground;
 
   public viewMode: ViewMode = 'linear';
@@ -161,12 +163,13 @@ export class SpaceEngine {
     this.scene.add(dirLight);
 
     // 5. Astronomical Milky Way Sky Dome
-    this.milkyWay = new MilkyWayBackground();
+    this.milkyWay = new MilkyWayBackground(this.localDust);
     this.scene.add(this.milkyWay.mesh);
 
     // 6. Procedural background stars
-    this.starField = new StarFieldBackground();
+    this.starField = new StarFieldBackground(undefined, this.localDust);
     this.scene.add(this.starField.points);
+    void this.localDust.load();
 
     // 7. Sub-renderers
     this.starRenderer = new StarRenderer(this.renderer.getPixelRatio());
@@ -674,6 +677,7 @@ export class SpaceEngine {
     this.deepSpaceRenderer.dispose();
     this.starField.dispose();
     this.milkyWay.dispose();
+    this.localDust.dispose();
     this.solSystemRenderer.dispose();
     this.scene.remove(this.deepSpaceRenderer.group, this.starField.points, this.milkyWay.mesh, this.solSystemRenderer.group);
     this.scene.traverse(object => {
