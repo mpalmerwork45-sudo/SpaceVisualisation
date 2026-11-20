@@ -110,7 +110,7 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
       vec3 p = uObserver + ray * distance;
       vec2 disc = vec2(centre.x - p.x, -p.z);
       float radius = length(disc), height = p.y;
-      float arms = texture2D(uGalacticArms, disc / 40.0 + 0.5).r;
+      vec4 arms = texture2D(uGalacticArms, disc / 40.0 + 0.5);
       float radial = exp(-radius / 2.6) * (1.0-smoothstep(14.0,19.0,radius));
       float thinDisc = radial * exp(-abs(height) / 0.28);
       float thickDisc = radial * exp(-abs(height) / 0.85);
@@ -119,13 +119,23 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
       // Taper the outer bar: a long exponential tail washes the whole sky in
       // warm light and overwhelms the stellar disc in an external view.
       float bulge = exp(-pow(bulgeRadius,1.5));
-      // Old stars form a smooth, broad bulge; young arms make a modest excess.
+      float solarDistance = length(p);
+      // Young stars populate spiral associations throughout the disc,
+      // including the Local arm where the extinction comes from the survey.
+      float outer = smoothstep(1.7, 3.9, radius) * (1.0 - smoothstep(14.0, 18.0, radius));
+      float starFormingDisc = outer * exp(-radius / 4.8);
       vec3 emissivity = vec3(1.0, 0.85, 0.68) * (bulge * 2.4 + thickDisc * 0.13)
-                      + vec3(0.83, 0.87, 1.0) * thinDisc * (0.75 + arms * 0.65);
+                      + vec3(0.83, 0.87, 1.0) * thinDisc * (0.75 + arms.r * 0.65)
+                      + vec3(0.90, 0.81, 0.70) * starFormingDisc * 0.26 * exp(-abs(height) / 0.31)
+                      + vec3(0.67, 0.83, 1.0) * starFormingDisc * (4.5 * arms.g) * exp(-abs(height) / 0.18)
+                      + vec3(1.0, 0.41, 0.42) * starFormingDisc * (4.0 * arms.a) * exp(-abs(height) / 0.085);
       float knots = noise3(p * vec3(2.3,11.0,2.3) + 31.0);
       float dust = exp(-radius / 4.5) * exp(-abs(height) / 0.065)
-                 * (0.55 + arms * 0.65) * (0.35 + knots * 1.5);
-      float solarDistance = length(p);
+                 * (0.55 + arms.r * 0.65) * (0.35 + knots * 1.5);
+      // Convert the modelled face-on dust column to an exponential layer.
+      // The measured optical depth below replaces analytic dust on overlap.
+      dust += smoothstep(dustFar, 2.0, solarDistance) * outer * exp(-radius / 8.0)
+            * arms.b * exp(-abs(height) / 0.065) / 0.13;
       if (!uSurveyReady && solarDistance > 0.1 && solarDistance < 1.4) {
         dust += mix(nearDust, farDust, smoothstep(solarMid-0.05,solarMid+0.05,distance))
               * exp(-pow((solarDistance-0.55)/0.22,2.0)) * 1.8;
