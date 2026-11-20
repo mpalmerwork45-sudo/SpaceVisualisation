@@ -3,7 +3,7 @@ import { RADIATIVE_TRANSFER_GLSL } from './RadiativeTransfer';
 export const LY_PER_KPC = 3261.563777;
 export const GALACTIC_CENTRE_KPC = 26700 / LY_PER_KPC;
 
-/** Galactic directions: +X centre, +Y north, +Z l=90. Angular cloud extents
+/** Galactic directions: +X centre, +Y north, -Z l=90. Angular cloud extents
  * are approximate landmark envelopes, not surveyed dust measurements. */
 export const GALACTIC_DUST_GLSL = /* glsl */ `
   float hash3(vec3 p) {
@@ -34,7 +34,7 @@ export const GALACTIC_DUST_GLSL = /* glsl */ `
     return exp(-0.5 * dot(delta, delta));
   }
   float foregroundDust(vec3 direction) {
-    vec2 lb = degrees(vec2(atan(direction.z, direction.x), asin(clamp(direction.y,-1.0,1.0))));
+    vec2 lb = degrees(vec2(atan(-direction.z, direction.x), asin(clamp(direction.y,-1.0,1.0))));
     // Great Rift chain, Ophiuchus and the southern Coalsack.
     float envelope = 1.3 * cloud(lb, vec2(75, 2), vec2(18, 4))
                    + 1.2 * cloud(lb, vec2(35, 3), vec2(18, 5))
@@ -97,7 +97,7 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
       float distance = previous + stepSize * 0.5;
       previous = farDistance;
       vec3 p = uObserver + ray * distance;
-      vec2 disc = vec2(centre.x - p.x, p.z);
+      vec2 disc = vec2(centre.x - p.x, -p.z);
       float radius = length(disc), height = p.y;
       float angle = atan(disc.y, disc.x);
       float spiral = 0.5 + 0.5 * cos(4.0 * (angle - log(max(radius, 0.3) / 8.2) / tan(radians(12.0))));

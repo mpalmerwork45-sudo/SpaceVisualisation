@@ -34,7 +34,7 @@ export function equatorialToCartesian(raHours: number, decDeg: number, distanceL
 
   const cosDec = Math.cos(decRad);
   const x = distanceLy * cosDec * Math.cos(raRad);
-  const z = distanceLy * cosDec * Math.sin(raRad);
+  const z = -distanceLy * cosDec * Math.sin(raRad);
   const y = distanceLy * Math.sin(decRad); // Equatorial North
 
   return new THREE.Vector3(x, y, z);
@@ -42,7 +42,7 @@ export function equatorialToCartesian(raHours: number, decDeg: number, distanceL
 
 /**
  * Returns a unit direction in the renderer's equatorial convention:
- * +X = RA 0h, +Z = RA 6h, +Y = equatorial north.
+ * +X = RA 0h, -Z = RA 6h, +Y = equatorial north.
  */
 export function radecToDirection(raHours: number, decDeg: number): THREE.Vector3 {
   return equatorialToCartesian(raHours, decDeg, 1).normalize();
@@ -58,7 +58,7 @@ export function equatorialToGalactic(eqPos: THREE.Vector3): THREE.Vector3 {
 
   // Reorder the renderer vector into conventional ICRS [X, Y, Z].
   const ix = eqPos.x;
-  const iy = eqPos.z;
+  const iy = -eqPos.z;
   const iz = eqPos.y;
   const m = ICRS_TO_GALACTIC;
 
@@ -66,8 +66,8 @@ export function equatorialToGalactic(eqPos: THREE.Vector3): THREE.Vector3 {
   const galY = m[3] * ix + m[4] * iy + m[5] * iz;
   const galZ = m[6] * ix + m[7] * iy + m[8] * iz;
 
-  // Return to the renderer convention: +X = l=0, +Z = l=90, +Y = b=90.
-  return new THREE.Vector3(galX, galZ, galY);
+  // Right-handed renderer convention: +X = l=0, -Z = l=90, +Y = b=90.
+  return new THREE.Vector3(galX, galZ, -galY);
 }
 
 /** Inverse of equatorialToGalactic, using the orthogonal transpose matrix. */
@@ -76,14 +76,14 @@ export function galacticToEquatorial(galPos: THREE.Vector3): THREE.Vector3 {
   if (distance === 0) return new THREE.Vector3();
 
   const gx = galPos.x;
-  const gy = galPos.z;
+  const gy = -galPos.z;
   const gz = galPos.y;
   const m = ICRS_TO_GALACTIC;
 
   const ix = m[0] * gx + m[3] * gy + m[6] * gz;
   const iy = m[1] * gx + m[4] * gy + m[7] * gz;
   const iz = m[2] * gx + m[5] * gy + m[8] * gz;
-  return new THREE.Vector3(ix, iz, iy);
+  return new THREE.Vector3(ix, iz, -iy);
 }
 
 /**
@@ -92,16 +92,16 @@ export function galacticToEquatorial(galPos: THREE.Vector3): THREE.Vector3 {
  */
 export function equatorialToEcliptic(eqPos: THREE.Vector3): THREE.Vector3 {
   const v = eqPos.clone();
-  // In this axis convention a positive X rotation maps the June-solstice
+  // In this axis convention a negative X rotation maps the June-solstice
   // direction (RA=6h, Dec=+epsilon) onto ecliptic latitude zero.
-  v.applyAxisAngle(new THREE.Vector3(1, 0, 0), ECLIPTIC_OBLIQUITY);
+  v.applyAxisAngle(new THREE.Vector3(1, 0, 0), -ECLIPTIC_OBLIQUITY);
   return v;
 }
 
 /**
  * Rotates vectors authored in the local Galactic frame into the selected
  * renderer frame. Galactic alignment is intentionally the identity: local
- * +X is l=0 (the Galactic centre), +Y is b=+90, and +Z is l=90.
+ * +X is l=0 (the Galactic centre), +Y is b=+90, and -Z is l=90.
  */
 export function galacticFrameQuaternion(alignment: CelestialAlignment): THREE.Quaternion {
   if (alignment === 'galactic') return new THREE.Quaternion();
@@ -169,9 +169,9 @@ export function celestialTangentBasis(raHours: number, decDeg: number): Celestia
   const sinDec = Math.sin(dec);
   const cosDec = Math.cos(dec);
 
-  const direction = new THREE.Vector3(cosDec * cosRa, sinDec, cosDec * sinRa);
-  const east = new THREE.Vector3(-sinRa, 0, cosRa);
-  const north = new THREE.Vector3(-sinDec * cosRa, cosDec, -sinDec * sinRa);
+  const direction = new THREE.Vector3(cosDec * cosRa, sinDec, -cosDec * sinRa);
+  const east = new THREE.Vector3(-sinRa, 0, -cosRa);
+  const north = new THREE.Vector3(-sinDec * cosRa, cosDec, sinDec * sinRa);
   return { direction, east, north };
 }
 

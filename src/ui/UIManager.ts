@@ -256,7 +256,7 @@ export class UIManager {
     document.getElementById('view-fov-value')!.textContent = `${fov < 1 ? fov.toFixed(2) : fov.toFixed(1)}°`;
     fovSlider.setAttribute('aria-valuetext', `${fov.toFixed(2)} degrees`);
     const pitchDeg = Math.round(Math.asin(direction.y) * (180 / Math.PI));
-    const yawRaw = ((Math.atan2(direction.z, direction.x) * (180 / Math.PI)) + 360) % 360;
+    const yawRaw = ((Math.atan2(-direction.z, direction.x) * (180 / Math.PI)) + 360) % 360;
     const yawDeg = Math.round(yawRaw) % 360;
     const rollDeg = Math.round(this.engine.cameraRoll * (180 / Math.PI));
     const radiusLy = this.engine.cameraRadius;

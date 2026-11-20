@@ -157,7 +157,7 @@ export function getJulianDate(date: Date = new Date()): number {
 /**
  * Computes exact 3D Cartesian position (x, y, z) in AU for a planet
  * given its Keplerian orbital elements at a specified date.
- * +Y is Ecliptic North, XZ plane is Ecliptic Plane.
+ * +Y is ecliptic north and increasing ecliptic longitude runs from +X toward -Z.
  */
 export function calculatePlanetPositionAU(p: KeplerianElements, date: Date = new Date()): THREE.Vector3 {
   const jd = getJulianDate(date);
@@ -195,7 +195,7 @@ export function calculatePlanetPositionAU(p: KeplerianElements, date: Date = new
   const z = r * (Math.sin(nodeRad) * Math.cos(u) + Math.cos(nodeRad) * Math.sin(u) * Math.cos(incRad));
   const y = r * (Math.sin(u) * Math.sin(incRad)); // Ecliptic inclination tilt
 
-  return new THREE.Vector3(x, y, z);
+  return new THREE.Vector3(x, y, -z);
 }
 
 /**
@@ -219,7 +219,7 @@ export function calculatePlanetOrbitPathAU(p: KeplerianElements, segments: numbe
     const z = r * (Math.sin(nodeRad) * Math.cos(u) + Math.cos(nodeRad) * Math.sin(u) * Math.cos(incRad));
     const y = r * (Math.sin(u) * Math.sin(incRad));
 
-    points.push(new THREE.Vector3(x, y, z));
+    points.push(new THREE.Vector3(x, y, -z));
   }
   return points;
 }

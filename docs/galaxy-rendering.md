@@ -10,7 +10,7 @@ random cloud of point particles.
 - The published ICRS-to-Galactic rotation matrix is used for Galactic
   longitude/latitude. The inverse is its orthogonal transpose.
 - In Galactic-aligned mode the background frame is the identity: `+X` is
-  `l=0°, b=0°` (the central bulge), `+Y` is the north Galactic pole, and `+Z`
+  `l=0°, b=0°` (the central bulge), `+Y` is the north Galactic pole, and `-Z`
   is `l=90°`. Center Galactic Bulge turns toward the centre from the current
   observer position, preserving the orbit anchor, radius, frame and field of view.
 - Ecliptic alignment uses the J2000 obliquity (23.439281°) with the renderer's

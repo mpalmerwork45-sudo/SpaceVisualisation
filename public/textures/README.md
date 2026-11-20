@@ -14,8 +14,8 @@ The application displays the credit and licence links beside the sky.
 The image is bundled locally, so sky loading does not contact ESO at runtime.
 
 Projection: Galactic equirectangular, centre longitude 0° at image centre,
-longitude increasing to the left, north at the top. This matches the existing
-SphereGeometry UV convention: +X at u=0.5, +Z at u=0.25, +Y at v=1.
+longitude increasing to the left and north at the top. The renderer maps
++X to u=0.5, -Z to u=0.25 and +Y to v=1.
 The Magellanic Clouds appear below and to the right of the centre.
 
 This is a processed photographic mosaic, not calibrated surface photometry

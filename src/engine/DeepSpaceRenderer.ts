@@ -50,7 +50,7 @@ export class DeepSpaceRenderer {
         const transform = (v: THREE.Vector3) => planeAlignment === 'galactic' ? equatorialToGalactic(v)
           : planeAlignment === 'ecliptic' ? equatorialToEcliptic(v) : v;
         mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
-          transform(axes.major), transform(axes.minor), position.clone().normalize()
+          transform(axes.major), transform(axes.minor), position.clone().normalize().negate()
         ));
         this.group.add(mesh);
       } else {

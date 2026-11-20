@@ -89,10 +89,10 @@ export class StarFieldBackground {
       const cosLatitude = Math.cos(latitude);
       const shellRadius = radius + (random() - 0.5) * 100;
 
-      // Local axes are +X=l=0, +Y=b=+90, +Z=l=90.
+      // Local axes are +X=l=0, +Y=b=+90, -Z=l=90.
       positions[i * 3] = shellRadius * cosLatitude * Math.cos(longitude);
       positions[i * 3 + 1] = shellRadius * Math.sin(latitude);
-      positions[i * 3 + 2] = shellRadius * cosLatitude * Math.sin(longitude);
+      positions[i * 3 + 2] = -shellRadius * cosLatitude * Math.sin(longitude);
 
       // Flux-limited naked-eye-like mix. Cool dwarfs dominate the Galaxy by
       // number, but most are too faint to dominate an apparent star field.

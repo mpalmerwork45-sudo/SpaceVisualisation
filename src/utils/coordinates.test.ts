@@ -36,6 +36,14 @@ describe('astronomical coordinate transforms', () => {
     expectVectorClose(pole, new THREE.Vector3(0, 1, 0), 2e-6);
   });
 
+  it('projects increasing right ascension to the left with celestial north up', () => {
+    const camera = new THREE.PerspectiveCamera();
+    camera.lookAt(1, 0, 0);
+    camera.updateMatrixWorld();
+    expect(radecToDirection(1, 0).project(camera).x).toBeLessThan(0);
+    expect(radecToDirection(23, 0).project(camera).x).toBeGreaterThan(0);
+  });
+
   it('maps the June-solstice direction to ecliptic latitude zero', () => {
     const epsilon = 23.439281;
     const ecliptic = equatorialToEcliptic(
@@ -102,6 +110,7 @@ describe('celestial tangent geometry', () => {
     const pa90 = positionAngleBasis(3, 12, 90);
     expectVectorClose(pa90.major, basis.east, 1e-8);
     expectVectorClose(pa90.minor, basis.north.clone().negate(), 1e-8);
+    expect(pa90.major.clone().cross(pa90.minor).dot(basis.direction)).toBeCloseTo(-1);
   });
 
   it('converts angular diameter to shell size', () => {

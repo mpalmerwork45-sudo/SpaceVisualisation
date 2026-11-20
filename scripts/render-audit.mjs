@@ -70,7 +70,7 @@ try {
     await evaluate(`{
       const e = auditEngine, m = e.milkyWay.mesh.material;
       e.milkyWay.update = undefined;
-      m.vertexShader = 'varying vec3 vDirection; void main() { vDirection=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }';
+      m.vertexShader = 'varying vec3 vDirection; void main() { vDirection=position*vec3(1.0,1.0,-1.0); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }';
       m.fragmentShader = ${JSON.stringify(fragment)};
       m.needsUpdate = true;
     }`);
@@ -124,7 +124,7 @@ try {
     return { renderer: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
       resolution: [1280,800], stationary: bench(false), moving: bench(true) };
   })()`);
-  for (const [name, direction] of [['centre',[1,0,0]], ['anticentre',[-1,0,0]], ['cygnus',[0,0,1]], ['pole',[0,1,.00001]]]) {
+  for (const [name, direction] of [['centre',[1,0,0]], ['anticentre',[-1,0,0]], ['cygnus',[0,0,-1]], ['pole',[0,1,-.00001]]]) {
     await evaluate(`auditPose(${JSON.stringify(direction)})`);
     await screenshot(`${name}-eye`);
   }

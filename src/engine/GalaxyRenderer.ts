@@ -262,7 +262,7 @@ export class GalaxyRenderer {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(position);
     mesh.scale.set(majorSize, majorSize, 1);
-    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(major, minor, direction));
+    mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(major, minor, direction.negate()));
     mesh.userData = { deepObjectData: dso, type: 'deepSpace' };
 
     const group = new THREE.Group();

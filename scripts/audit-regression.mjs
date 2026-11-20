@@ -88,6 +88,28 @@ try {
     return { errorAU };
   });
 
+  results.skyOrientation = await page.evaluate(() => {
+    const e = engine;
+    click('btn-top-g-pole');
+    click('btn-mode-real');
+    e.focusSkyDirection(new THREE.Vector3(1, 0, 0), 55);
+    snap();
+    const east = e.resolveSelection('star', 'nunki').position.project(e.camera);
+    const west = e.resolveSelection('star', 'antares').position.project(e.camera);
+    check(east.x < 0 && west.x > 0, 'Galactic north-up view places Nunki left of the bulge and Antares right');
+    const shell = e.milkyWay.mesh;
+    shell.position.copy(e.camera.position);
+    shell.updateMatrixWorld();
+    const raycaster = new THREE.Raycaster();
+    const imageU = x => {
+      raycaster.setFromCamera(new THREE.Vector2(x, 0), e.camera);
+      return raycaster.intersectObject(shell)[0].uv.x;
+    };
+    const left = imageU(-.3), right = imageU(.3);
+    check(left < .5 && right > .5, 'ESO panorama samples the same north-up orientation as the catalogue');
+    return { east: east.x, west: west.x, imageU: [left, right] };
+  });
+
   results.selectionAndFilters = await page.evaluate(() => {
     click('btn-view-sol');
     document.querySelector('[data-class="G"]').click();

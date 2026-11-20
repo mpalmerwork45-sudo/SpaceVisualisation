@@ -36,6 +36,9 @@ export class MilkyWayBackground {
     this.configureTexture(this.texture);
 
     const geometry = new THREE.SphereGeometry(9000, 96, 64);
+    // ESO's panorama has increasing Galactic longitude to the left.
+    const uv = geometry.getAttribute('uv');
+    for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
     this.material = new THREE.MeshBasicMaterial({
       map: this.texture,
       side: THREE.BackSide,
