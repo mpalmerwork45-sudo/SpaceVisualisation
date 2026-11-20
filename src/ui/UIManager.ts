@@ -170,7 +170,7 @@ export class UIManager {
       <div class="search-container">
         <div class="search-box">
           <span class="search-icon">🔍</span>
-          <input type="text" id="search-input" aria-label="Search celestial objects" placeholder="Search stars, planets, nebulae, constellations… [/]" autocomplete="off" />
+          <input type="text" id="search-input" aria-label="Search celestial objects" placeholder="Search the sky (Mars, Milky Way, Coalsack…) [/]" autocomplete="off" />
           <div id="search-results" class="search-results hidden"></div>
         </div>
       </div>

@@ -328,6 +328,7 @@ export class SpaceEngine {
   }
 
   public async setMilkyWayMode(mode: MilkyWayMode) {
+    if (mode === 'render') void this.localDust.load();
     await this.milkyWay.setMode(mode);
     if (!this.disposed) this.starField.points.visible = this.milkyWay.mode === 'render';
   }
@@ -336,8 +337,10 @@ export class SpaceEngine {
   public inspectGalacticView(view: GalacticView) {
     this.clearFocus();
     const external = view === 'milky_way';
-    this.setViewMode(external ? 'linear' : 'realistic');
-    this.setPlaneAlignment('galactic');
+    const mode = external ? 'linear' : 'realistic';
+    const frameChanged = this.rotatePlaneAlignment('galactic');
+    if (this.viewMode !== mode) this.setViewMode(mode);
+    else if (frameChanged) this.rebuildAllData();
     this.gridRenderer.setRingsVisible(false);
     this.gridRenderer.setGridVisible(false);
     this.setObservationMode('enhancedOptical');
