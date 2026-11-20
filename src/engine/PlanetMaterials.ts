@@ -23,6 +23,7 @@ const vertexShader = /* glsl */ `
 // exaggeration keeps the separation visible at interactive display scales.
 export const EARTH_CLOUD_RADIUS = 1.012;
 const earthClouds = /* glsl */ `
+  uniform float uCloudOpacity;
   float cloudCover(vec3 p, float time) {
     float wind = p.y * p.y * 1.4 + 0.24 * sin(7.0 * p.y) + time * 0.0015;
     p.xz = mat2(cos(wind), -sin(wind), sin(wind), cos(wind)) * p.xz;
@@ -30,6 +31,27 @@ const earthClouds = /* glsl */ `
     float fronts = fbm(p * vec3(7.0, 13.0, 7.0) + 2.1 * eddy);
     float wisps = noise3(p * 46.0 + fronts * 7.0);
     return smoothstep(0.43, 0.65, fronts + 0.10 * (wisps - 0.5));
+  }
+
+  vec3 ellipsoidRay(vec3 worldView, mat4 model, float polarRatio) {
+    // Planet poses contain rotation and translation. Bring the ray into
+    // body coordinates, then stretch the polar axis to a unit sphere.
+    vec3 ray = worldView * mat3(model);
+    return normalize(vec3(ray.x, ray.y / polarRatio, ray.z));
+  }
+
+  vec3 intersectCloudDeck(vec3 ground, vec3 ray) {
+    float b = dot(ground, ray);
+    float travel = -b + sqrt(b*b + ${EARTH_CLOUD_RADIUS ** 2 - 1});
+    return normalize(ground + travel * ray);
+  }
+
+  vec4 cloudLighting(vec3 p, vec3 n, vec3 view, vec3 sun, float time) {
+    float light = smoothstep(-0.10, 0.88, dot(n, sun));
+    float limb = 1.0 - clamp(dot(n, view), 0.0, 1.0);
+    float haze = limb * limb * limb * light;
+    vec3 colour = mix(vec3(0.88, 0.94, 1.0), vec3(0.19, 0.44, 0.84), haze) * (0.018 + 1.5 * light);
+    return vec4(colour, max(cloudCover(p, time) * 0.93, haze * 0.55) * uCloudOpacity);
   }
 `;
 
@@ -110,9 +132,7 @@ const fragmentShader = /* glsl */ `
       // Intersect the ray to Sol with the cloud layer so shadows shift
       // towards the terminator and remain registered with the moving deck.
       vec3 ray = normalize(vec3(uLocalSun.x, uLocalSun.y / uPolarRatio, uLocalSun.z));
-      float b = dot(p, ray);
-      float travel = -b + sqrt(b*b + ${EARTH_CLOUD_RADIUS ** 2 - 1});
-      transmission -= 0.44 * cloudCover(normalize(p + ray * travel), uTime);
+      transmission -= 0.44 * uCloudOpacity * cloudCover(intersectCloudDeck(p, ray), uTime);
       atmosphere = 0.57;
     } else if (uKind == 4 && uMapReady) {
       // Muted broadband colours bring out the structure of the Voyager belts.
@@ -187,6 +207,16 @@ const fragmentShader = /* glsl */ `
     vec3 halfVector = normalize(uSun + view);
     colour += vec3(0.9,0.93,1.0) * pow(max(dot(normal, halfVector),0.0),90.0) * ocean * day * 0.6;
     colour += air * rim * atmosphere * smoothstep(-0.3,0.4,sunlight);
+    if (uKind == 2) {
+      // At planetary scale the depth buffer cannot distinguish ground and
+      // nearby clouds. Intersect the actual view ray with the cloud deck
+      // and composite in linear light, leaving one opaque depth sample.
+      vec3 ray = ellipsoidRay(view, modelMatrix, uPolarRatio);
+      vec3 cloudPoint = intersectCloudDeck(p, ray);
+      vec3 cloudNormal = normalize(mat3(modelMatrix) * vec3(cloudPoint.x, cloudPoint.y / uPolarRatio, cloudPoint.z));
+      vec4 cloud = cloudLighting(cloudPoint, cloudNormal, view, uSun, uTime);
+      colour = mix(colour, cloud.rgb, cloud.a);
+    }
     gl_FragColor = vec4(colour,1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -206,6 +236,7 @@ export function createPlanetMaterial(id: string, colour: string, polarRatio: num
       uPolarRatio: { value: polarRatio },
       uSurfaceMap: { value: null },
       uMapReady: { value: false },
+      uCloudOpacity: { value: 1 },
       uTime: { value: 0 }
     }
   });
@@ -216,11 +247,16 @@ export function createEarthClouds(radius: number, surface: THREE.ShaderMaterial)
   const geometry = new THREE.SphereGeometry(radius * EARTH_CLOUD_RADIUS, 64, 48).scale(1, polarRatio, 1);
   const material = new THREE.ShaderMaterial({
     vertexShader,
-    uniforms: { uSun: surface.uniforms.uSun, uTime: surface.uniforms.uTime, uPolarRatio: surface.uniforms.uPolarRatio },
+    uniforms: {
+      uSun: surface.uniforms.uSun, uTime: surface.uniforms.uTime,
+      uPolarRatio: surface.uniforms.uPolarRatio, uCloudOpacity: surface.uniforms.uCloudOpacity
+    },
     fragmentShader: /* glsl */ `
       varying vec3 vSurface;
       varying vec3 vNormal;
       varying vec3 vWorld;
+      uniform mat4 modelMatrix;
+      uniform float uPolarRatio;
       uniform vec3 uSun;
       uniform float uTime;
       #include <common>
@@ -229,13 +265,14 @@ export function createEarthClouds(radius: number, surface: THREE.ShaderMaterial)
       ${earthClouds}
       void main() {
         #include <logdepthbuf_fragment>
-        vec3 n = normalize(vNormal);
-        float light = smoothstep(-0.10, 0.88, dot(n, uSun));
-        float limb = 1.0 - max(0.0, dot(n, normalize(cameraPosition - vWorld)));
-        float haze = pow(limb, 3.0) * light;
-        float clouds = cloudCover(normalize(vSurface), uTime);
-        vec3 colour = mix(vec3(0.88, 0.94, 1.0), vec3(0.19, 0.44, 0.84), haze) * (0.018 + 1.5 * light);
-        gl_FragColor = vec4(colour, max(clouds * 0.93, haze * 0.55));
+        vec3 p = normalize(vSurface);
+        vec3 view = normalize(cameraPosition - vWorld);
+        vec3 ray = ellipsoidRay(view, modelMatrix, uPolarRatio);
+        // The ground pass already integrated clouds wherever this ray hits
+        // Earth. Only the narrow atmospheric silhouette needs this mesh.
+        float impact = length(cross(p * ${EARTH_CLOUD_RADIUS}, ray));
+        if (impact < 1.0) discard;
+        gl_FragColor = cloudLighting(p, normalize(vNormal), view, uSun, uTime);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }
