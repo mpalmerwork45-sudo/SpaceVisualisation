@@ -1,7 +1,7 @@
 // Unit-sphere density fields. RGB is emitted/scattered light per unit path and
 // the fourth channel is extinction, including absorption by foreground dust.
 export const NEBULA_MODELS = {
-  orion: 0, ring: 1, helix: 2, crab: 3, pleiades: 4, nucleus: 5, eagle: 6, carina: 7
+  orion: 0, ring: 1, helix: 2, crab: 3, pleiades: 4, eagle: 6, carina: 7
 } as const;
 
 const modelById: Record<string, number> = {
@@ -14,8 +14,8 @@ const modelById: Record<string, number> = {
   carina_nebula: NEBULA_MODELS.carina
 };
 
-export function nebulaKind(id: string, isNuclearRegion: boolean): number {
-  return isNuclearRegion ? NEBULA_MODELS.nucleus : modelById[id] ?? NEBULA_MODELS.orion;
+export function nebulaKind(id: string): number {
+  return modelById[id] ?? NEBULA_MODELS.orion;
 }
 
 export const NEBULA_MORPHOLOGY_GLSL = /* glsl */ `
@@ -161,15 +161,12 @@ export const NEBULA_MORPHOLOGY_GLSL = /* glsl */ `
     float fine = noise3(p*35.0+uSeed);
     float ripple = 1.45*(coarse-0.5)+0.64*(detail-0.5)+0.21*(fine-0.5);
     float clumps = 0.36 + 1.20*smoothstep(-0.38,0.40,ripple);
-    if (uKind == ${NEBULA_MODELS.orion}) return orionGas(p,ripple,clumps);
     if (uKind == ${NEBULA_MODELS.eagle}) return eagleGas(p,ripple,clumps);
     if (uKind == ${NEBULA_MODELS.carina}) return carinaGas(p,ripple,clumps);
     if (uKind == ${NEBULA_MODELS.ring}) return ringGas(p,ripple,clumps);
     if (uKind == ${NEBULA_MODELS.helix}) return helixGas(p,ripple,clumps);
     if (uKind == ${NEBULA_MODELS.crab}) return crabGas(p,ripple,clumps);
     if (uKind == ${NEBULA_MODELS.pleiades}) return pleiadesDust(p,ripple,clumps);
-    float core = cloudlet(p*2.83)*0.25;
-    float dust = profile(p.y+0.07,0.25)*(1.25+ripple)*3.0;
-    return vec4(vec3(0.57,0.41,0.25)*core, 0.60*core+dust);
+    return orionGas(p,ripple,clumps);
   }
 `;

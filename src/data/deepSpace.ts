@@ -300,10 +300,15 @@ export const DEEP_SPACE_OBJECTS: DeepSpaceObjectData[] = [
     ra: 17.761,
     dec: -29.008,
     dist: 26600.0,
-    angularSizeArcmin: 180,
+    // Render the inner 20 pc around Sgr A*. The cluster has a 4.2 pc
+    // half-light radius and projected axis ratio 0.71 along the Galactic plane.
+    // Schödel et al. (2014), https://doi.org/10.1051/0004-6361/201423481
+    angularSizeArcmin: 16.8,
+    angularSizeMinorArcmin: 16.8 * 0.71,
+    positionAngleDeg: 31.4,
     colorHex: 0xffb74d,
     secondaryColorHex: 0x7e57c2,
     constellation: 'Sagittarius',
-    description: 'Supermassive black hole and dense nuclear star cluster core at the heart of our Milky Way Galaxy.'
+    description: 'Sagittarius A* lies at the centre of a compact nuclear star cluster. Infrared observations reveal a flattened cluster with half of its light inside about 4.2 parsecs. The model shows its stellar light around the unresolved black hole.'
   }
 ];

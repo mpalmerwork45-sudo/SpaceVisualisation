@@ -4,6 +4,22 @@ import { DeepSpaceRenderer } from './DeepSpaceRenderer';
 import { angularDiameterToWorldSize } from '../utils/coordinates';
 
 describe('deep-space volumes', () => {
+  it('adds compact nuclear starlight above the Galactic bulge at its physical size', () => {
+    const renderer = new DeepSpaceRenderer();
+    renderer.updateDeepSpace('linear', 'galactic');
+    const cluster = renderer.objectsMap.get('milky_way_core')!.mesh as THREE.Mesh;
+    const radiusPc = cluster.scale.x / 3.26156;
+    expect(radiusPc).toBeCloseTo(20, 0);
+    expect(cluster.scale.z).toBe(cluster.scale.x);
+    expect(cluster.scale.y / cluster.scale.x).toBeCloseTo(0.71, 5);
+    const minorAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(cluster.quaternion);
+    expect(Math.abs(minorAxis.y)).toBeGreaterThan(0.999);
+    const material = cluster.material as THREE.ShaderMaterial;
+    expect(material.blendSrc).toBe(THREE.OneMinusDstColorFactor);
+    expect(material.blendDst).toBe(THREE.OneFactor);
+    renderer.dispose();
+  });
+
   it('renders one inclined galaxy volume with the catalogue’s projected major and minor extents', () => {
     const renderer = new DeepSpaceRenderer();
     renderer.setExposure(1.45);

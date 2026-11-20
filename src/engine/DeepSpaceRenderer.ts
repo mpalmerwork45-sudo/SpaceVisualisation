@@ -93,7 +93,8 @@ export class DeepSpaceRenderer {
     const diameter = angularDiameterToWorldSize(dso.angularSizeArcmin, distance);
     const mesh = createNebulaVolume(dso, this.exposure);
     const aspect = (dso.angularSizeMinorArcmin ?? dso.angularSizeArcmin) / dso.angularSizeArcmin;
-    mesh.scale.set(diameter * 0.5, diameter * aspect * 0.5, diameter * 0.35);
+    const depthRadius = diameter * (dso.type === 'galacticFeature' ? 0.5 : 0.35);
+    mesh.scale.set(diameter * 0.5, diameter * aspect * 0.5, depthRadius);
     mesh.userData = { deepObjectData: dso, type: 'deepSpace' };
     return mesh;
   }
