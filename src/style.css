@@ -739,6 +739,7 @@ button.active {
 
 /* The top layout follows content height; no overlapping fixed offsets. */
 .top-controls { position: absolute; inset: 16px 16px auto; }
+.top-controls:has(.simulation-controls:focus-within) { z-index: 21; }
 .navbar { gap: 16px; align-items: flex-start; }
 .brand { flex-shrink: 0; }
 .navigation-options { min-width: 0; flex: 1; pointer-events: auto; }

@@ -568,6 +568,24 @@ try {
     results.layout.push(dimensions);
     if (width === 1280 || width === 390) { await page.evaluate(() => draw()); await page.screenshot({path:`${output}/solar-${width}.png`}); }
   }
+  await page.setViewportSize({width:390,height:844});
+  await page.evaluate(() => { search('Earth'); snap(); });
+  await page.getByRole('button', {name:'Set orbital date and playback'}).click();
+  await page.getByRole('button', {name:'Play', exact:true}).click({timeout:5000});
+  const playbackStart = await page.evaluate(() => {
+    engine.clock.getDelta();
+    const time = engine.simulationDate.getTime();
+    engine.animate();
+    return time;
+  });
+  await page.waitForFunction(start => engine.simulationDate.getTime() > start + 86400000, playbackStart);
+  await page.getByRole('button', {name:'Pause', exact:true}).click({timeout:5000});
+  await page.evaluate(() => {
+    cancelAnimationFrame(engine.animationFrameId);
+    check(!engine.simulationPlaying && !document.getElementById('detail-modal').classList.contains('hidden'),
+      'mobile playback controls respond to clicks while planet details are open');
+  });
+
   const fallback = await browser.newPage({viewport:{width:390,height:844}});
   try {
     await fallback.addInitScript(() => {
