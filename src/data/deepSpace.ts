@@ -163,12 +163,12 @@ export const DEEP_SPACE_OBJECTS: DeepSpaceObjectData[] = [
       armPitchAnglesDeg: [8, 11],
       armContrast: 0.34,
       dustOpacity: 0.48,
-      source: 'NASA/IPAC M31 atlas; optical major/minor extent and position angle'
+      source: 'NASA/IPAC for optical geometry and Draine et al. (2014) for the infrared dust map'
     },
     colorHex: 0xffecb3,
     secondaryColorHex: 0x90caf9,
     constellation: 'Andromeda',
-    description: 'Nearest major spiral galaxy to Milky Way, harboring over 1 trillion stars on collision course with us in 4B years.'
+    description: 'The nearest large spiral to the Milky Way. Look for the dust lanes crossing its bright disc and the broad ring about 11 kiloparsecs from its centre.'
   },
   {
     id: 'triangulum_m33',

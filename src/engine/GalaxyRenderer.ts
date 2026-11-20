@@ -163,6 +163,23 @@ function transformEquatorialVector(vector: THREE.Vector3, alignment: PlaneAlignm
   return vector;
 }
 
+// Intersect the same unit sphere that bounds the shader's integration. A
+// central ray can pass exactly between triangles at the mesh's longitude seam.
+const pickRay = new THREE.Ray();
+const inverseWorld = new THREE.Matrix4();
+const closest = new THREE.Vector3();
+function pickGalaxyVolume(this: THREE.Mesh, caster: THREE.Raycaster, hits: THREE.Intersection[]) {
+  pickRay.copy(caster.ray).applyMatrix4(inverseWorld.copy(this.matrixWorld).invert());
+  const mid = -pickRay.origin.dot(pickRay.direction);
+  const chordSquared = 1 - pickRay.at(mid, closest).lengthSq();
+  if (chordSquared < 0) return;
+  const exit = mid + Math.sqrt(chordSquared);
+  if (exit < 0) return;
+  const point = pickRay.at(exit, new THREE.Vector3()).applyMatrix4(this.matrixWorld);
+  const distance = caster.ray.origin.distanceTo(point);
+  if (distance >= caster.near && distance <= caster.far) hits.push({ object: this, distance, point });
+}
+
 export class GalaxyRenderer {
   public readonly group = new THREE.Group();
   public readonly nodes = new Map<string, RenderedGalaxyNode>();
@@ -222,6 +239,7 @@ export class GalaxyRenderer {
       const minor = transformEquatorialVector(axes.minor, alignment).normalize();
       const normal = position.clone().normalize().negate();
       mesh = new THREE.Mesh(this.volumeGeometry, this.createMaterial(dso, appearance, depthRatio));
+      mesh.raycast = pickGalaxyVolume;
       mesh.scale.set(radius, radius, radius * depthRatio);
       mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(major, minor, normal));
       // The catalogue minor axis points southeast. For M31 the northwest
