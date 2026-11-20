@@ -6,6 +6,7 @@ the pinned source, coordinate system, units and decoding.
 
 import argparse
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -14,18 +15,37 @@ from astropy.io import fits
 from astropy_healpix import HEALPix
 
 
-WIDTH, HEIGHT, DEPTH = 256, 128, 64
+DEPTH = 64
 SAMPLES = 8  # quadrature points along each angular axis of a target pixel
 EDGES_PC = np.geomspace(69.0, 1250.0, DEPTH + 1)
 TAU_PER_E = 2.8 * np.log(10.0) / 2.5  # paper section 7, A(540 nm) = 2.8 E
 TARGET = Path(__file__).resolve().parents[2] / "public/data/local-dust-edenhofer.bin"
+CLOUD_TARGET = TARGET.with_name("local-dust-clouds.bin")
 
 
-def angular_footprints(healpix):
+@dataclass(frozen=True)
+class Field:
+    name: str
+    width: int
+    height: int
+    lon_min: float
+    lon_max: float
+    lat_min: float
+    lat_max: float
+
+
+ALL_SKY = Field("All sky", 256, 128, 0, 360, -90, 90)
+# Region order is also the order of the 64-layer slabs in the cloud asset.
+CLOUDS = (Field("Coalsack", 128, 96, 288, 316, -12, 8),
+          Field("Cygnus Rift", 128, 96, 64, 92, -8, 12))
+
+
+def angular_footprints(healpix, field):
     """Indices of equal-solid-angle sample points in each output texel."""
     fraction = (np.arange(SAMPLES) + 0.5) / SAMPLES
-    lon = (np.arange(WIDTH)[:, None] + fraction) * (2 * np.pi / WIDTH)
-    sin_edges = np.sin(np.linspace(-np.pi / 2, np.pi / 2, HEIGHT + 1))
+    step = np.deg2rad(field.lon_max - field.lon_min) / field.width
+    lon = np.deg2rad(field.lon_min) + (np.arange(field.width)[:, None] + fraction) * step
+    sin_edges = np.sin(np.linspace(np.deg2rad(field.lat_min), np.deg2rad(field.lat_max), field.height + 1))
     sin_lat = sin_edges[:-1, None] + np.diff(sin_edges)[:, None] * fraction
     lat = np.arcsin(sin_lat)
     return healpix.lonlat_to_healpix(
@@ -33,7 +53,7 @@ def angular_footprints(healpix):
     ).astype(np.int32)
 
 
-def rebin(hdus):
+def read_release(hdus):
     mean = hdus["MEAN"]
     if mean.header["ORDERING"] != "NEST" or mean.header["NSIDE"] != 256:
         raise ValueError("Expected the released nested NSIDE=256 survey map")
@@ -45,9 +65,17 @@ def rebin(hdus):
         raise ValueError("Mean density data does not match the pinned Edenhofer release")
     if hashlib.sha256(raw_edges).hexdigest() != "b970a0cee003ba0ec227f9c3b9d283ca7af78e87be93a3bb2daefb591108a89d":
         raise ValueError("Radial boundaries do not match the pinned Edenhofer release")
-    boundaries = raw_edges.astype(np.float64)
-    footprints = angular_footprints(HEALPix(nside=256, order="nested"))
-    result = np.empty((DEPTH, HEIGHT, WIDTH), dtype=np.float64)
+    return raw, raw_edges.astype(np.float64)
+
+
+def rebin(raw, boundaries, field):
+    footprints = angular_footprints(HEALPix(nside=256, order="nested"), field)
+    # A small region only needs its own HEALPix columns from the full survey.
+    if field != ALL_SKY:
+        occupied, remap = np.unique(footprints, return_inverse=True)
+        raw = raw[:, occupied]
+        footprints = remap.reshape(footprints.shape)
+    result = np.empty((DEPTH, field.height, field.width), dtype=np.float64)
     # A native sightline integrated independently through the released radial
     # shells checks both the rebinning and the back-conversion of the texture.
     column = np.zeros(raw.shape[1], dtype=np.float64)
@@ -69,7 +97,7 @@ def rebin(hdus):
     return result, reference_column
 
 
-def encode_and_validate(density, reference_column):
+def encode_and_validate(density, reference_column, field):
     encoded = np.rint(np.log2(1 + density / 0.125) * (255 / 12))
     if encoded.max() > 255:
         raise ValueError(f"Texture would clip peak density {density.max():.3f} per kpc")
@@ -81,13 +109,15 @@ def encode_and_validate(density, reference_column):
     column = (decoded * widths_kpc).sum(axis=0)
     dusty = reference_column > 0.05
     fractional = np.abs(column[dusty] / reference_column[dusty] - 1)
-    print(f"Peak density {density.max():.4f} per kpc, highest byte {encoded.max()}")
+    print(f"{field.name}: peak density {density.max():.4f} per kpc, highest byte {encoded.max()}")
     print(f"Median / 99th percentile fractional column error (tau > 0.05): {np.quantile(fractional, [0.5, 0.99])}")
     if np.quantile(fractional, 0.99) > 0.02:
         raise ValueError("Quantization introduced unexpectedly large column errors")
     for label, lon, lat in [("Coalsack", 303, -1), ("Cygnus", 78, 2), ("Galactic centre", 0, 0), ("High latitude", 303, 55)]:
-        x = int((lon % 360) / 360 * WIDTH)
-        y = int((lat + 90) / 180 * HEIGHT)
+        if not (field.lon_min <= lon < field.lon_max and field.lat_min <= lat < field.lat_max):
+            continue
+        x = int((lon - field.lon_min) / (field.lon_max - field.lon_min) * field.width)
+        y = int((lat - field.lat_min) / (field.lat_max - field.lat_min) * field.height)
         profile = decoded[:, y, x]
         peak = np.argmax(profile)
         print(f"{label} pixel ({x}, {y})  native/decoded τ = "
@@ -99,13 +129,17 @@ def encode_and_validate(density, reference_column):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="Edenhofer v1.0.2 mean_and_std_healpix.fits")
-    parser.add_argument("--output", type=Path, default=TARGET)
+    parser.add_argument("--clouds", action="store_true", help="prepare the two native-resolution cloud regions")
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    target = args.output or (CLOUD_TARGET if args.clouds else TARGET)
+    fields = CLOUDS if args.clouds else (ALL_SKY,)
     with fits.open(args.source, memmap=True) as hdus:
-        data = encode_and_validate(*rebin(hdus))
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_bytes(data)
-    print(f"{hashlib.sha256(data).hexdigest()}  {args.output}")
+        raw, boundaries = read_release(hdus)
+        data = b"".join(encode_and_validate(*rebin(raw, boundaries, field), field) for field in fields)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    print(f"{hashlib.sha256(data).hexdigest()}  {target}")
 
 
 if __name__ == "__main__":
