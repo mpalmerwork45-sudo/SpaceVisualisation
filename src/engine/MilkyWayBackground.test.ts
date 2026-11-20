@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { MilkyWayBackground } from './MilkyWayBackground';
+import { LocalDustVolume } from './LocalDustVolume';
 import { LY_PER_KPC } from './GalacticSkyModel';
 import { galacticFrameQuaternion } from '../utils/coordinates';
 
-function harness() {
-  const sky = new MilkyWayBackground();
+function harness(volume?: LocalDustVolume) {
+  const sky = new MilkyWayBackground(volume);
   const camera = new THREE.PerspectiveCamera(55, 1.6, 1e-11, 1e8);
   const size = new THREE.Vector2(1280, 800);
   const target = new THREE.WebGLRenderTarget(4, 4);
@@ -22,6 +23,16 @@ function harness() {
 }
 
 describe('procedural radiance pass', () => {
+  it('reintegrates a stationary sky as soon as the shared dust atlas arrives', () => {
+    const dust = new LocalDustVolume();
+    const { sky, renderer, target, draw } = harness(dust);
+    draw(); draw();
+    expect(renderer.render).toHaveBeenCalledTimes(1);
+    dust.uniforms.uSurveyReady.value = true;
+    draw(); draw();
+    expect(renderer.render).toHaveBeenCalledTimes(2);
+    sky.dispose(); target.dispose(); dust.dispose();
+  });
   it('reintegrates an unchanged view after WebGL context restoration', () => {
     const { sky, renderer, target, draw } = harness();
     draw(); draw();

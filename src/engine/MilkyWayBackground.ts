@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { PlaneAlignment } from './StarRenderer';
 import { galacticFrameQuaternion, ViewMode } from '../utils/coordinates';
-import { GALACTIC_SKY_FRAGMENT_SHADER, LY_PER_KPC } from './GalacticSkyModel';
+import { LocalDustVolume, localDustUniforms } from './LocalDustVolume';
+import { createGalacticArmTexture } from './GalacticArms';
+import { GALACTIC_CENTRE_KPC, GALACTIC_SKY_FRAGMENT_SHADER, LY_PER_KPC } from './GalacticSkyModel';
 
 export type MilkyWayMode = 'render' | 'photo';
 
@@ -31,7 +33,10 @@ export class MilkyWayBackground {
   private textureLoading?: Promise<void>;
   private photoLoaded = false;
 
-  constructor() {
+  private readonly armTexture = createGalacticArmTexture(GALACTIC_CENTRE_KPC);
+  private surveyReady = false;
+
+  constructor(localDust?: LocalDustVolume) {
     this.texture = new THREE.Texture();
     this.configureTexture(this.texture);
 
@@ -57,7 +62,10 @@ export class MilkyWayBackground {
         }
       `,
       fragmentShader: GALACTIC_SKY_FRAGMENT_SHADER,
-      uniforms: { uObserver: { value: new THREE.Vector3() } },
+      uniforms: {
+        uObserver: { value: new THREE.Vector3() }, uGalacticArms: { value: this.armTexture },
+        ...(localDust?.uniforms ?? localDustUniforms())
+      },
       side: THREE.BackSide, depthWrite: false, depthTest: false, toneMapped: false
     });
     this.integrationMesh = new THREE.Mesh(geometry, this.integrationMaterial);
@@ -132,7 +140,8 @@ export class MilkyWayBackground {
     observer.copy(camera.position).applyQuaternion(this.inverseFrame).divideScalar(LY_PER_KPC);
     if (viewMode !== 'linear') observer.set(0, 0, 0);
     camera.updateMatrixWorld();
-    if (!this.dirty && this.lastView.equals(camera.matrixWorld) &&
+    const ready = this.integrationMaterial.uniforms.uSurveyReady.value as boolean;
+    if (!this.dirty && this.surveyReady === ready && this.lastView.equals(camera.matrixWorld) &&
         this.lastProjection.equals(camera.projectionMatrix) && this.lastObserver.equals(observer)) return;
 
     this.integrationMesh.position.copy(camera.position);
@@ -146,6 +155,7 @@ export class MilkyWayBackground {
       renderer.setRenderTarget(previousTarget);
       renderer.autoClear = previousAutoClear;
     }
+    this.surveyReady = ready;
     this.lastView.copy(camera.matrixWorld);
     this.lastProjection.copy(camera.projectionMatrix);
     this.lastObserver.copy(observer);
@@ -192,6 +202,7 @@ export class MilkyWayBackground {
     this.proceduralMaterial.dispose();
     this.integrationMaterial.dispose();
     this.radiance.dispose();
+    this.armTexture.dispose();
     this.texture.dispose();
   }
 

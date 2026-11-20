@@ -1,3 +1,4 @@
+import { LOCAL_DUST_GLSL } from './LocalDustVolume';
 import { RADIATIVE_TRANSFER_GLSL } from './RadiativeTransfer';
 
 export const LY_PER_KPC = 3261.563777;
@@ -50,7 +51,9 @@ export const GALACTIC_DUST_GLSL = /* glsl */ `
 export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
   varying vec3 vDirection;
   uniform vec3 uObserver;
+  uniform sampler2D uGalacticArms;
   ${GALACTIC_DUST_GLSL}
+  ${LOCAL_DUST_GLSL}
   ${RADIATIVE_TRANSFER_GLSL}
   void main() {
     vec3 ray = normalize(vDirection);
@@ -73,8 +76,17 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
     float halfChord = sqrt(max(0.55*0.55-dot(solarClosest,solarClosest), 0.0));
     vec3 nearPoint = uObserver + ray * (solarMid-halfChord);
     vec3 farPoint = uObserver + ray * (solarMid+halfChord);
-    float nearDust = foregroundDust(length(nearPoint) > 0.001 ? normalize(nearPoint) : ray);
-    float farDust = foregroundDust(length(farPoint) > 0.001 ? normalize(farPoint) : ray);
+    float nearDust = 0.0, farDust = 0.0;
+    if (!uSurveyReady) {
+      nearDust = foregroundDust(length(nearPoint) > 0.001 ? normalize(nearPoint) : ray);
+      farDust = foregroundDust(length(farPoint) > 0.001 ? normalize(farPoint) : ray);
+    }
+    vec4 survey = surveyChord(uObserver,ray,exitDistance);
+    // An exact radial integral is available at Sol; crossfade smoothly over
+    // the first parsec to the physical off-axis quadrature.
+    float offSunWeight = smoothstep(0.0001,0.001,length(uObserver));
+    vec2 solarUV = dustUV(ray);
+    vec2 lastSurvey = vec2(0.0);
     // From above/below the disc, uniform long-path steps can jump over its
     // thin dust layer, drawing false concentric rings. Spend 64 of 96 samples
     // within +/-1.5 kpc of the midplane and 16 on each outer segment.
@@ -95,13 +107,10 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
       }
       float stepSize = farDistance - previous;
       float distance = previous + stepSize * 0.5;
-      previous = farDistance;
       vec3 p = uObserver + ray * distance;
       vec2 disc = vec2(centre.x - p.x, -p.z);
       float radius = length(disc), height = p.y;
-      float angle = atan(disc.y, disc.x);
-      float spiral = 0.5 + 0.5 * cos(4.0 * (angle - log(max(radius, 0.3) / 8.2) / tan(radians(12.0))));
-      float arms = pow(spiral, 4.0) * smoothstep(1.5, 3.5, radius);
+      float arms = texture2D(uGalacticArms, disc / 40.0 + 0.5).r;
       float radial = exp(-radius / 2.6) * (1.0-smoothstep(14.0,19.0,radius));
       float thinDisc = radial * exp(-abs(height) / 0.28);
       float thickDisc = radial * exp(-abs(height) / 0.85);
@@ -117,11 +126,25 @@ export const GALACTIC_SKY_FRAGMENT_SHADER = /* glsl */ `
       float dust = exp(-radius / 4.5) * exp(-abs(height) / 0.065)
                  * (0.55 + arms * 0.65) * (0.35 + knots * 1.5);
       float solarDistance = length(p);
-      if (solarDistance > 0.1 && solarDistance < 1.4) {
+      if (!uSurveyReady && solarDistance > 0.1 && solarDistance < 1.4) {
         dust += mix(nearDust, farDust, smoothstep(solarMid-0.05,solarMid+0.05,distance))
               * exp(-pow((solarDistance-0.55)/0.22,2.0)) * 1.8;
       }
-      vec3 tau = vec3(0.76, 1.0, 1.38) * dust * stepSize * 1.8;
+      vec2 measured = vec2(0.0);
+      if (uSurveyReady) {
+        if (offSunWeight < 1.0 && previous < dustFar && farDistance > dustNear) {
+          vec2 total = vec2(solarDustColumn(solarUV,farDistance),coveredDistance(farDistance));
+          measured = max(vec2(0.0),total-lastSurvey);
+          lastSurvey = total;
+        }
+        if (offSunWeight > 0.0 && previous < survey.y && farDistance > survey.x) {
+          measured = mix(measured, offSunDust(uObserver,ray,survey,previous,farDistance), offSunWeight);
+        }
+      }
+      previous = farDistance;
+      // Survey density is already calibrated as visual optical depth/kpc.
+      float tauV = measured.x + 1.8*dust*max(0.0,stepSize-measured.y);
+      vec3 tau = vec3(0.76, 1.0, 1.38) * tauV;
       vec3 attenuation = exp(-tau);
       colour += transmission * emissivity * stepSize * emissionIntegral(tau);
       transmission *= attenuation;

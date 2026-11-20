@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { galacticFrameQuaternion, ViewMode } from '../utils/coordinates';
 import { PlaneAlignment } from './StarRenderer';
+import { LOCAL_DUST_GLSL, LocalDustVolume, localDustUniforms } from './LocalDustVolume';
 import { GALACTIC_CENTRE_KPC, GALACTIC_DUST_GLSL, LY_PER_KPC } from './GalacticSkyModel';
 
 const STAR_VERTEX_SHADER = /* glsl */ `
@@ -12,6 +13,7 @@ const STAR_VERTEX_SHADER = /* glsl */ `
   #include <common>
   #include <logdepthbuf_pars_vertex>
   ${GALACTIC_DUST_GLSL}
+  ${LOCAL_DUST_GLSL}
 
   float dustAtCrossing(vec3 ray, float crossing, float distanceToStar) {
     float weight = smoothstep(-120.0, 120.0, crossing)
@@ -37,16 +39,34 @@ const STAR_VERTEX_SHADER = /* glsl */ `
     vec3 sightline = position - uObserver;
     float distanceToStar = max(length(sightline), 0.01);
     vec3 ray = sightline / distanceToStar;
-    float relativeFlux = min(3.0, dot(position, position) / (distanceToStar * distanceToStar));
-    vColor = color * relativeFlux * exp(-vec3(0.72, 1.0, 1.42) * foregroundExtinction(ray, distanceToStar));
-    float luminance = dot(vColor,vec3(0.2126,0.7152,0.0722));
-    vColor = mix(vColor,vec3(luminance),uEyeAdapted*0.8) * mix(1.0,0.32,uEyeAdapted);
     // Render behind the catalogue and distant objects while keeping the
     // angular displacement computed from the physical stellar position.
     vec4 mvPosition = modelViewMatrix * vec4(ray * uRenderDistance, 1.0);
     gl_Position = projectionMatrix * mvPosition;
     #include <logdepthbuf_vertex>
     gl_PointSize = clamp(size, 0.35, 3.0);
+    // Frustum rejection avoids tracing the dust for off-screen point stars.
+    if (gl_Position.w <= 0.0 || any(greaterThan(abs(gl_Position.xy), 1.02*gl_Position.ww))) {
+      vColor = vec3(0.0);
+      return;
+    }
+    float tau;
+    if (uSurveyReady) {
+      vec3 origin = uObserver / ${LY_PER_KPC};
+      float end = distanceToStar / ${LY_PER_KPC};
+      float offSunWeight = smoothstep(0.0001,0.001,length(origin));
+      tau = offSunWeight < 1.0 ? solarDustColumn(dustUV(ray),end) : 0.0;
+      if (offSunWeight > 0.0) {
+        vec4 chord = surveyChord(origin,ray,end);
+        tau = mix(tau, offSunDust(origin,ray,chord,0.0,end).x, offSunWeight);
+      }
+    } else {
+      tau = foregroundExtinction(ray,distanceToStar);
+    }
+    float relativeFlux = min(3.0, dot(position, position) / (distanceToStar * distanceToStar));
+    vColor = color * relativeFlux * exp(-vec3(0.76, 1.0, 1.38) * tau);
+    float luminance = dot(vColor,vec3(0.2126,0.7152,0.0722));
+    vColor = mix(vColor,vec3(luminance),uEyeAdapted*0.8) * mix(1.0,0.32,uEyeAdapted);
   }
 `;
 
@@ -77,7 +97,7 @@ export class StarFieldBackground {
   public points: THREE.Points<THREE.BufferGeometry, THREE.ShaderMaterial>;
   private inverseFrame = new THREE.Quaternion();
 
-  constructor(count: number = 100000) {
+  constructor(count: number = 100000, localDust?: LocalDustVolume) {
     console.log(`🌌 [StarFieldBackground] Generating ${count.toLocaleString()} deterministic unresolved stars...`);
 
     const geometry = new THREE.BufferGeometry();
@@ -149,6 +169,7 @@ export class StarFieldBackground {
       vertexShader: STAR_VERTEX_SHADER,
       fragmentShader: STAR_FRAGMENT_SHADER,
       uniforms: {
+        ...(localDust?.uniforms ?? localDustUniforms()),
         uEyeAdapted: { value: 1 },
         uObserver: { value: new THREE.Vector3() },
         uRenderDistance: { value: 90_000_000 }
