@@ -1,6 +1,6 @@
 # Local Milky Way dust extinction
 
-`local-dust-edenhofer.bin` is a reduced version of the posterior mean in
+The all-sky atlas and two higher-resolution cloud regions use the posterior mean in
 *A parsec-scale Galactic 3D dust map out to 1.25 kpc from the Sun*, by Gordian
 Edenhofer, Catherine Zucker, Philipp Frank, Andrew K. Saydjari, Joshua S.
 Speagle, Douglas Finkbeiner and Torsten Enßlin. The source is the v1.0.2
@@ -41,6 +41,40 @@ distance outwards. Values represent cell centres. Decode a byte `b` as
 For a heliocentric point `(x,y,z)` in the app’s Galactic frame, use
 `l = atan2(-z,x)` and `b_lat = asin(y/r)`.
 
+## Coalsack and Cygnus Rift
+
+`local-dust-clouds.bin` retains more of the native survey's angular detail
+through all 64 distance shells. Each region has 128 longitude cells and 96
+latitude cells, about 0.22° × 0.21° per cell. A native NSIDE 256 HEALPix
+pixel has an area equivalent to a square about 0.23° on a side.
+
+| Region index | Galactic longitude edges | Galactic latitude edges |
+| --- | --- | --- |
+| 0 · Coalsack | 288° to 316° | −12° to +8° |
+| 1 · Cygnus Rift | 64° to 92° | −8° to +12° |
+
+The 1,572,864-byte file stores the 64 Coalsack layers first and the 64
+Cygnus Rift layers second. Within each layer, longitude increases fastest,
+then latitude. The cloud and all-sky files use the same radial boundaries and
+byte encoding. They represent the same dust at two angular resolutions. A
+renderer can blend between the two estimates at each region's boundary.
+
+Each cloud texel averages 8 × 8 equal-solid-angle samples of the original
+HEALPix map. For all 24,576 cloud sightlines the radial reduction preserves
+the native integral to floating-point precision. Quantization changes the
+column by less than 0.80% at the 99th percentile in both regions, for
+directions with optical depth above 0.05.
+
+As a separate spatial check, we evaluated the decoded, bilinearly
+interpolated columns at the centres of the original HEALPix pixels at least
+1.4° inside each boundary. The reference is the original HEALPix density at
+each centre integrated from 69 to 1,250 pc, before the runtime radial taper.
+
+| Region | Native sightlines | All-sky atlas RMS error in τV | Cloud atlas RMS error in τV |
+| --- | ---: | ---: | ---: |
+| Coalsack | 8,223 | 0.1302 | 0.0321 |
+| Cygnus Rift | 8,223 | 0.2654 | 0.0617 |
+
 ## Reproduction
 
 The pinned upstream FITS has MD5 `10c823a5fcf81b47b6e15530bcdf54dc`.
@@ -49,12 +83,17 @@ root after downloading the FITS file.
 
 ```sh
 python scripts/data/prepare_local_dust.py /path/to/mean_and_std_healpix.fits
+python scripts/data/prepare_local_dust.py --clouds /path/to/mean_and_std_healpix.fits
 ```
 
 The script checks the rebinned column for every direction, reports
 quantization errors and prints representative sightline integrals. NumPy
-2.3.1, Astropy 8.0.3 and astropy-healpix 2.0.1 produced SHA-256
-`81bfa27d5a9a87f2c947f23c5373a0b51d324b51dd88666cf0a947e7f0ca3204`.
+2.3.1, Astropy 8.0.3 and astropy-healpix 2.0.1 produced these SHA-256 hashes.
+
+| File | SHA-256 |
+| --- | --- |
+| `local-dust-edenhofer.bin` | `81bfa27d5a9a87f2c947f23c5373a0b51d324b51dd88666cf0a947e7f0ca3204` |
+| `local-dust-clouds.bin` | `79176180657da0961d7c8927c47c5b48d8684cb5564e0fc74788c7ef2cb81ad4` |
 
 All 32,768 resampled directions conserve the native column within floating
 point precision before encoding. For directions with optical depth above

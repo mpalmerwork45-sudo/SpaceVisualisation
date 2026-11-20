@@ -68,8 +68,9 @@ def read_release(hdus):
     return raw, raw_edges.astype(np.float64)
 
 
-def rebin(raw, boundaries, field):
-    footprints = angular_footprints(HEALPix(nside=256, order="nested"), field)
+def prepare_field(raw, boundaries, field):
+    healpix = HEALPix(nside=256, order="nested")
+    footprints = angular_footprints(healpix, field)
     # A small region only needs its own HEALPix columns from the full survey.
     if field != ALL_SKY:
         occupied, remap = np.unique(footprints, return_inverse=True)
@@ -94,7 +95,10 @@ def rebin(raw, boundaries, field):
         result[z] = averaged[footprints].mean(axis=(2, 3)) * (1000 * TAU_PER_E)
     if not np.isfinite(result).all() or np.min(result) < 0:
         raise ValueError("Invalid differential extinction in survey")
-    return result, reference_column
+    encoded, decoded_column = encode_and_validate(result, reference_column, field)
+    if field != ALL_SKY:
+        validate_cloud_projection(healpix, occupied, column * TAU_PER_E, decoded_column, field)
+    return encoded
 
 
 def encode_and_validate(density, reference_column, field):
@@ -123,7 +127,29 @@ def encode_and_validate(density, reference_column, field):
         print(f"{label} pixel ({x}, {y})  native/decoded τ = "
               f"{reference_column[y,x]:.5f} / {column[y,x]:.5f}, "
               f"peak layer [{EDGES_PC[peak]:.1f}, {EDGES_PC[peak + 1]:.1f}] pc")
-    return encoded.tobytes(order="C")
+    return encoded.tobytes(order="C"), column
+
+
+def validate_cloud_projection(healpix, native_ids, native_columns, image, field):
+    """Sample the encoded cloud column at the original HEALPix centres."""
+    lon, lat = healpix.healpix_to_lonlat(native_ids)
+    lon, lat = lon.deg, lat.deg
+    # The runtime mixes in the all-sky atlas along this peripheral strip.
+    interior = ((lon > field.lon_min + 1.4) & (lon < field.lon_max - 1.4) &
+                (lat > field.lat_min + 1.4) & (lat < field.lat_max - 1.4))
+    x = (lon[interior] - field.lon_min) * field.width / (field.lon_max - field.lon_min) - 0.5
+    y = (lat[interior] - field.lat_min) * field.height / (field.lat_max - field.lat_min) - 0.5
+    ix, iy = x.astype(int), y.astype(int)
+    dx, dy = x - ix, y - iy
+    lower = image[iy, ix] * (1 - dx) + image[iy, ix + 1] * dx
+    upper = image[iy + 1, ix] * (1 - dx) + image[iy + 1, ix + 1] * dx
+    projected = lower * (1 - dy) + upper * dy
+    native = native_columns[interior]
+    rms = np.sqrt(np.mean((projected - native) ** 2))
+    correlation = np.corrcoef(projected, native)[0, 1]
+    print(f"Native-pixel check across {len(native)} sightlines: RMS tau error {rms:.4f}, r={correlation:.4f}")
+    if not correlation > 0.99:
+        raise ValueError("Projected cloud structure disagrees with the native HEALPix columns")
 
 
 def main():
@@ -136,7 +162,7 @@ def main():
     fields = CLOUDS if args.clouds else (ALL_SKY,)
     with fits.open(args.source, memmap=True) as hdus:
         raw, boundaries = read_release(hdus)
-        data = b"".join(encode_and_validate(*rebin(raw, boundaries, field), field) for field in fields)
+        data = b"".join(prepare_field(raw, boundaries, field) for field in fields)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
     print(f"{hashlib.sha256(data).hexdigest()}  {target}")
