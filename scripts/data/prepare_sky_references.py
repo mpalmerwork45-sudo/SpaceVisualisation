@@ -1,6 +1,7 @@
 """Build small, offline optical and submillimetre reference fields for the sky audit."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -60,10 +61,12 @@ def gaia():
 def planck(path):
     width, height = 96, 64
     l0, l1, b0, b1 = 290, 314, -10, 6
+    with path.open("rb") as raw:
+        checksum = hashlib.file_digest(raw, "sha256").hexdigest()
+    if checksum != "a236478b0ec459df485cecc618e3f77e02b4c251dd21c31d61d3fa1835da36b1":
+        raise ValueError("Expected the complete Planck GNILC opacity R2.01 FITS")
     with fits.open(path) as hdus:
         hdu = hdus[1]
-        if hdu.header["COORDSYS"].strip() != "GALACTIC" and hdu.header["COORDSYS"].strip() != "G":
-            raise ValueError("Expected Galactic coordinates")
         hp = HEALPix(nside=hdu.header["NSIDE"], order=hdu.header["ORDERING"].strip().lower())
         opacity = hdu.data["TAU353"]
         y, x = np.mgrid[:height, :width]
