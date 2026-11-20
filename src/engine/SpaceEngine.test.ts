@@ -77,6 +77,24 @@ describe('Solar System opening/reset preset', () => {
     expect(engine.camera.getWorldDirection(new THREE.Vector3()).distanceTo(expected)).toBeLessThan(1e-4);
   });
 
+  it('reverses a polar sightline in place and restores it on a second turn', () => {
+    const engine = cameraHarness();
+    engine.cameraPhi = 0.0001;
+    engine.cameraRoll = 0.3;
+    engine.updateCameraPosition();
+    const origin = engine.camera.position.clone();
+    const heading = engine.camera.getWorldDirection(new THREE.Vector3());
+    const expected = heading.clone().negate();
+    engine.turnAround180();
+    engine.updateCameraPosition();
+    expect(engine.camera.position.distanceTo(origin)).toBeLessThan(1e-12);
+    expect(engine.camera.getWorldDirection(new THREE.Vector3()).distanceTo(expected)).toBeLessThan(1e-10);
+    expect(engine.targetCameraRoll).toBe(0.3);
+    engine.turnAround180();
+    engine.updateCameraPosition();
+    expect(engine.camera.getWorldDirection(new THREE.Vector3()).distanceTo(heading)).toBeLessThan(1e-10);
+  });
+
   it('changes orbit elevation and optical framing independently of focus distance', () => {
     const engine = cameraHarness();
     const target = engine.targetCameraTarget.clone();

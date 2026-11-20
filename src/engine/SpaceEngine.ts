@@ -6,7 +6,7 @@ import { DeepSpaceRenderer } from './DeepSpaceRenderer';
 import { GridRenderer } from './GridRenderer';
 import { MilkyWayBackground, MilkyWayMode } from './MilkyWayBackground';
 import { StarFieldBackground } from './StarFieldBackground';
-import { frameRotation, galacticFrameQuaternion, orbitOffset, scaleDistance, viewDirectionToOrbitAngles, ViewMode } from '../utils/coordinates';
+import { angularDiameterToWorldSize, frameRotation, galacticFrameQuaternion, inwardViewDirection, orbitOffset, scaleDistance, viewDirectionToOrbitAngles, ViewMode } from '../utils/coordinates';
 import { StarData, STARS_CATALOG } from '../data/stars';
 import { DeepSpaceObjectData } from '../data/deepSpace';
 import { CONSTELLATIONS } from '../data/constellations';
@@ -33,6 +33,7 @@ const MAX_CAMERA_PHI = Math.PI - MIN_CAMERA_PHI;
 const MIN_CAMERA_RADIUS = 0.0000000001;
 const MAX_CAMERA_RADIUS = 2500000;
 const SOL_CAMERA_RADIUS = 0.0003; // ~19 AU: close view of the planetary system.
+const SKY_CAMERA_RADIUS = 0.01;
 
 export class SpaceEngine {
   public scene: THREE.Scene;
@@ -74,6 +75,7 @@ export class SpaceEngine {
   public cameraFov: number = 55;
   public targetCameraFov: number = 55;
   private skyLookDirection: THREE.Vector3 | null = null;
+  private catalogueFocus: { type: NonNullable<SelectedObjectType>; id: string } | null = null;
 
   private isDragging: boolean = false;
   private previousMousePosition = { x: 0, y: 0 };
@@ -163,12 +165,7 @@ export class SpaceEngine {
     // Default Viewpoint: Planetary Level zoom centered on Sol
     this.setPresetViewpoint('sol_center');
     // Apply the opening pose before the first frame, without an initial glide.
-    this.cameraTarget.copy(this.targetCameraTarget);
-    this.cameraRadius = this.targetCameraRadius;
-    this.cameraTheta = this.targetCameraTheta;
-    this.cameraPhi = this.targetCameraPhi;
-    this.cameraRoll = this.targetCameraRoll;
-    this.cameraFov = this.targetCameraFov;
+    this.applyTargetCameraPose();
 
     // Bind event listeners
     this.bindEvents();
@@ -223,27 +220,36 @@ export class SpaceEngine {
   }
 
   public turnAround180() {
-    console.log('🔄 [SpaceEngine] Smoothly turning camera view around by 180 degrees.');
-    if (this.skyLookDirection) this.skyLookDirection.negate();
-    else this.targetCameraTheta += Math.PI;
+    const direction = this.skyLookDirection?.clone() ?? this.camera.getWorldDirection(new THREE.Vector3());
+    this.turnInPlace(direction.negate());
+    this.activePreset = null;
+    this.onStateChange?.();
   }
 
   public setViewMode(mode: ViewMode) {
-    console.log(`🔄 [SpaceEngine] View mode changed to "${mode}"`);
+    const previousMode = this.viewMode;
+    const heading = this.camera.getWorldDirection(new THREE.Vector3());
+    const focus = this.catalogueFocus;
     this.viewMode = mode;
     this.focusedPlanetId = null;
     this.activePreset = null;
     this.targetCameraFov = 55;
+    this.gridRenderer.setRingsVisible(mode !== 'realistic');
+    this.gridRenderer.setGridVisible(mode !== 'realistic');
+    if (mode === 'realistic') this.setObservationMode('darkAdaptedEye');
+    this.rebuildAllData();
 
-    if (mode === 'realistic') {
-      this.gridRenderer.setRingsVisible(false);
-      this.gridRenderer.setGridVisible(false);
-    } else {
-      this.gridRenderer.setRingsVisible(true);
-      this.gridRenderer.setGridVisible(true);
+    const selection = focus && this.resolveSelection(focus.type, focus.id);
+    if (selection) this.frameObject(selection);
+    else if (mode === 'realistic') this.aimSky(heading, 55);
+    else if (previousMode === 'realistic') {
+      this.aimOrbit(new THREE.Vector3(), 25);
+      this.setTargetViewDirection(heading);
     }
 
-    this.rebuildAllData();
+    // The old pose and the new catalogue use different distance scales.
+    if (mode !== previousMode) this.applyTargetCameraPose();
+    this.onStateChange?.();
   }
 
   public setObservationMode(mode: 'darkAdaptedEye' | 'enhancedOptical') {
@@ -282,6 +288,7 @@ export class SpaceEngine {
     this.starField.setPlaneAlignment(alignment);
     this.rebuildAllData();
     this.updateCameraPosition();
+    this.onStateChange?.();
   }
 
   public setSpectralFilter(filter: string) {
@@ -323,31 +330,26 @@ export class SpaceEngine {
     this.constellationRenderer.updateConstellations(this.starRenderer, this.viewMode, this.planeAlignment);
     this.deepSpaceRenderer.updateDeepSpace(this.viewMode, this.planeAlignment);
     this.gridRenderer.updateGrid(this.viewMode, this.planeAlignment);
-    this.onStateChange?.();
   }
 
   public setPresetViewpoint(preset: CameraPreset) {
-    console.log(`🎥 [Camera Preset] Smoothly gliding to preset "${preset}"`);
     if (preset === 'galactic_center' || preset === 'galactic_north') {
-      // Turn in place. Orbit focus, position, projection, roll and zoom remain
-      // intact; the sightline is independent of the orbit anchor.
-      this.targetCameraTarget.copy(this.cameraTarget);
-      this.targetCameraRadius = this.cameraRadius;
-      this.targetCameraTheta = this.cameraTheta;
-      this.targetCameraPhi = this.cameraPhi;
-      this.targetCameraFov = this.cameraFov;
-      this.targetCameraRoll = this.cameraRoll;
-      const centreDistance = this.viewMode === 'realistic' ? 9000 : scaleDistance(26700, this.viewMode);
-      this.skyLookDirection = new THREE.Vector3(centreDistance, 0, 0)
+      const centreDistance = scaleDistance(26700, this.viewMode);
+      const direction = new THREE.Vector3(centreDistance, 0, 0)
         .applyQuaternion(galacticFrameQuaternion(this.planeAlignment))
         .sub(this.camera.position).normalize();
+      this.turnInPlace(direction);
       this.activePreset = 'galactic_center';
       this.onStateChange?.();
       return;
     }
-    const previousHeading = this.camera.getWorldDirection(new THREE.Vector3());
-    this.skyLookDirection = null;
-    this.focusedPlanetId = null;
+    if (preset === 'realistic_sky') {
+      this.setViewMode('realistic');
+      this.activePreset = preset;
+      this.onStateChange?.();
+      return;
+    }
+    this.clearFocus();
     this.targetCameraRoll = 0;
     this.targetCameraFov = 55;
 
@@ -382,61 +384,99 @@ export class SpaceEngine {
       this.targetCameraTarget.set(0, 0, 0);
       this.targetCameraRadius = 85;
       this.setTargetViewDirection(new THREE.Vector3(0, -1, 0));
-    } else if (preset === 'realistic_sky') {
-      this.viewMode = 'realistic';
-      this.setObservationMode('darkAdaptedEye');
-      this.gridRenderer.setRingsVisible(false);
-      this.gridRenderer.setGridVisible(false);
-      this.rebuildAllData();
-      this.targetCameraTarget.set(0, 0, 0);
-      this.targetCameraRadius = 0.01;
-      // Preserve the current heading when entering the observer's sky.
-      this.setTargetViewDirection(previousHeading);
     }
-    if (preset !== 'realistic_sky') this.camera.up.set(0, 1, 0);
+    this.camera.up.set(0, 1, 0);
     this.activePreset = preset;
     this.onStateChange?.();
   }
 
   public flyToPosition(targetPos: THREE.Vector3, focusRadius: number = 15) {
-    this.skyLookDirection = null;
-    this.focusedPlanetId = null;
-    this.activePreset = null;
-    console.log(`✈️ [SpaceEngine] Smooth gliding flight to target position:`, targetPos);
-    this.targetCameraTarget.copy(targetPos);
-    this.targetCameraRadius = THREE.MathUtils.clamp(focusRadius, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
-    this.targetCameraFov = 55;
+    this.clearFocus();
+    this.aimOrbit(targetPos, focusRadius);
     this.onStateChange?.();
   }
 
+  private aimOrbit(targetPos: THREE.Vector3, focusRadius: number) {
+    this.skyLookDirection = null;
+    this.targetCameraTarget.copy(targetPos);
+    this.targetCameraRadius = THREE.MathUtils.clamp(focusRadius, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
+    this.targetCameraFov = 55;
+  }
+
   public focusPlanet(id: string) {
-    const planet = this.solSystemRenderer.planetsMap.get(id);
-    if (!planet) return;
+    if (!this.solSystemRenderer.planetsMap.has(id)) return;
+    this.clearFocus();
     if (this.viewMode !== 'linear') this.setViewMode('linear');
     if (this.planeAlignment !== 'ecliptic') this.setPlaneAlignment('ecliptic');
-    this.flyToPosition(planet.mesh.position, planet.mesh.userData.displayRadius * (id === 'saturn' ? 12 : 7));
-    // Present a sunlit three-quarter view; orbiting remains fully interactive.
-    const radial = planet.mesh.position.clone().negate().normalize().add(new THREE.Vector3(0, 0.4, 0.25)).normalize();
-    this.setTargetViewDirection(radial.negate());
-    this.targetCameraRoll = 0;
-    this.camera.up.set(0, 1, 0);
-    this.focusedPlanetId = id;
+    const selection = this.resolveSelection('planet', id);
+    if (selection) this.frameObject(selection);
     this.onStateChange?.();
+  }
+
+  public focusObject(type: NonNullable<SelectedObjectType>, id: string) {
+    if (type === 'planet') return this.focusPlanet(id);
+    if (type === 'star' && id === 'sol') return this.setPresetViewpoint('sol_center');
+    const selection = this.resolveSelection(type, id);
+    if (!selection) return;
+    this.frameObject(selection);
+    this.onStateChange?.();
+  }
+
+  private frameObject(selection: ObjectSelection) {
+    const { type, data, position } = selection;
+    if (!type) return;
+    this.catalogueFocus = { type, id: data.id };
+    this.focusedPlanetId = null;
+    this.activePreset = null;
+
+    const angularSize = type === 'deepSpace' ? data.galaxy?.majorArcmin ?? data.angularSizeArcmin : 0;
+    if (this.viewMode === 'realistic') {
+      const fov = type === 'deepSpace' ? angularSize * 1.8 / 60 : type === 'constellation' ? 35 : 12;
+      this.aimSky(position, fov);
+      return;
+    }
+    if (type === 'planet') {
+      const planet = this.solSystemRenderer.planetsMap.get(data.id)!;
+      this.aimOrbit(position, planet.mesh.userData.displayRadius * (data.id === 'saturn' ? 12 : 7));
+      // View the sunlit side from slightly above the orbital plane.
+      const direction = position.clone().normalize().add(new THREE.Vector3(0, -0.4, -0.25));
+      this.setTargetViewDirection(direction);
+      this.targetCameraRoll = 0;
+      this.camera.up.set(0, 1, 0);
+      this.focusedPlanetId = data.id;
+      return;
+    }
+
+    let radius = Math.max(type === 'constellation' ? 15 : 10, position.length() * 0.5);
+    if (type === 'deepSpace') {
+      const diameter = angularDiameterToWorldSize(angularSize, Math.max(position.length(), 0.001));
+      if (this.viewMode === 'logarithmic') radius = Math.max(2, diameter * 1.4);
+      else radius = data.galaxy ? Math.max(20, data.galaxy.physicalDiameterLy * 0.8) : Math.max(0.5, diameter * 1.4);
+    }
+    this.aimOrbit(position, radius);
+  }
+
+  private clearFocus() {
+    this.skyLookDirection = null;
+    this.catalogueFocus = null;
+    this.focusedPlanetId = null;
+    this.activePreset = null;
   }
 
   /** Face a sky direction while keeping the observer at Sol. */
   public focusSkyDirection(targetPos: THREE.Vector3, fieldOfViewDeg: number = 12) {
-    this.skyLookDirection = null;
-    this.focusedPlanetId = null;
-    this.activePreset = null;
-    const direction = targetPos.clone().normalize();
-    if (direction.lengthSq() === 0) return;
+    if (targetPos.lengthSq() === 0) return;
+    this.clearFocus();
+    this.aimSky(targetPos, fieldOfViewDeg);
+    this.onStateChange?.();
+  }
 
+  private aimSky(direction: THREE.Vector3, fieldOfViewDeg: number) {
+    this.skyLookDirection = null;
     this.targetCameraTarget.set(0, 0, 0);
-    this.targetCameraRadius = 0.01;
+    this.targetCameraRadius = SKY_CAMERA_RADIUS;
     this.setTargetViewDirection(direction);
     this.targetCameraFov = THREE.MathUtils.clamp(fieldOfViewDeg, 0.05, 75);
-    this.onStateChange?.();
   }
 
   /** Focus an extended catalogue object at a useful multiple of its angular size. */
@@ -444,14 +484,39 @@ export class SpaceEngine {
     this.focusSkyDirection(targetPos, (angularSizeArcmin / 60) * 1.8);
   }
 
+  private applyTargetCameraPose() {
+    this.cameraTarget.copy(this.targetCameraTarget);
+    this.cameraRadius = this.targetCameraRadius;
+    this.cameraTheta = this.targetCameraTheta;
+    this.cameraPhi = this.targetCameraPhi;
+    this.cameraRoll = this.targetCameraRoll;
+    this.cameraFov = this.targetCameraFov;
+    this.updateCameraPosition();
+  }
+
+  private turnInPlace(direction: THREE.Vector3) {
+    this.targetCameraTarget.copy(this.cameraTarget);
+    this.targetCameraRadius = this.cameraRadius;
+    this.targetCameraTheta = this.cameraTheta;
+    this.targetCameraPhi = this.cameraPhi;
+    this.targetCameraFov = this.cameraFov;
+    this.targetCameraRoll = this.cameraRoll;
+    this.skyLookDirection = direction;
+  }
+
   public updateCameraPosition() {
     this.cameraPhi = THREE.MathUtils.clamp(this.cameraPhi, MIN_CAMERA_PHI, MAX_CAMERA_PHI);
     this.cameraRadius = THREE.MathUtils.clamp(this.cameraRadius, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
 
-    this.camera.position.copy(this.cameraTarget).add(orbitOffset(this.cameraRadius, this.cameraTheta, this.cameraPhi));
-    this.camera.lookAt(this.skyLookDirection
-      ? this.camera.position.clone().add(this.skyLookDirection)
-      : this.cameraTarget);
+    if (this.viewMode === 'realistic') {
+      this.camera.position.set(0, 0, 0);
+      this.camera.lookAt(this.skyLookDirection ?? inwardViewDirection(this.cameraTheta, this.cameraPhi));
+    } else {
+      this.camera.position.copy(this.cameraTarget).add(orbitOffset(this.cameraRadius, this.cameraTheta, this.cameraPhi));
+      this.camera.lookAt(this.skyLookDirection
+        ? this.camera.position.clone().add(this.skyLookDirection)
+        : this.cameraTarget);
+    }
 
     if (Math.abs(this.camera.fov - this.cameraFov) > 0.001) {
       this.camera.fov = this.cameraFov;
@@ -462,17 +527,23 @@ export class SpaceEngine {
       this.camera.rotateZ(this.cameraRoll);
     }
 
-    if (this.cameraRadius > 0.005 && this.cameraTarget.length() < 0.1) {
-      this.solSystemRenderer.group.visible = false;
-    } else {
-      this.solSystemRenderer.group.visible = true;
-    }
+    this.solSystemRenderer.group.visible = this.viewMode !== 'realistic' && this.camera.position.lengthSq() < 0.005 ** 2;
   }
 
   private setTargetViewDirection(direction: THREE.Vector3) {
     const { theta, phi } = viewDirectionToOrbitAngles(direction);
     this.targetCameraTheta = theta;
     this.targetCameraPhi = THREE.MathUtils.clamp(phi, MIN_CAMERA_PHI, MAX_CAMERA_PHI);
+  }
+
+  private zoomBy(factor: number, immediate = false) {
+    if (this.viewMode === 'realistic') {
+      this.setFieldOfView(this.targetCameraFov * factor);
+      if (immediate) this.cameraFov = this.targetCameraFov;
+      return;
+    }
+    this.targetCameraRadius = THREE.MathUtils.clamp(this.targetCameraRadius * factor, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
+    if (immediate) this.cameraRadius = this.targetCameraRadius;
   }
 
   /** Release GPU resources when the visualizer is unmounted or replaced. */
@@ -527,7 +598,7 @@ export class SpaceEngine {
         const oldDistance = previous.distanceTo(other);
         previous.set(e.clientX, e.clientY);
         const newDistance = previous.distanceTo(other);
-        if (newDistance > 0 && oldDistance > 0) this.targetCameraRadius = THREE.MathUtils.clamp(this.targetCameraRadius * oldDistance/newDistance, MIN_CAMERA_RADIUS, MAX_CAMERA_RADIUS);
+        if (newDistance > 0 && oldDistance > 0) this.zoomBy(oldDistance / newDistance, true);
         this.suppressClick = true;
         this.previousMousePosition = { x: e.clientX, y: e.clientY };
         return;
@@ -575,13 +646,9 @@ export class SpaceEngine {
     dom.addEventListener('lostpointercapture', releasePointer, { signal });
 
     dom.addEventListener('wheel', (e) => {
+      if (e.deltaY === 0) return;
       e.preventDefault();
-      const zoomFactor = e.deltaY > 0 ? 1.15 : 0.85;
-      this.targetCameraRadius = THREE.MathUtils.clamp(
-        this.targetCameraRadius * zoomFactor,
-        MIN_CAMERA_RADIUS,
-        MAX_CAMERA_RADIUS
-      );
+      this.zoomBy(e.deltaY > 0 ? 1.15 : 0.85);
     }, { passive: false, signal });
 
     dom.addEventListener('click', e => {

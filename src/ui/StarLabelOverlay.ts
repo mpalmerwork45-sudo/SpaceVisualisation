@@ -123,20 +123,10 @@ export class StarLabelOverlay {
 
         labelElem.addEventListener('click', (e) => {
           e.stopPropagation();
-          const currentNode = this.engine.starRenderer.starsMap.get(cand.id);
-          if (!currentNode) return;
-          if (this.engine.viewMode === 'realistic') {
-            this.engine.focusSkyDirection(currentNode.position, 12);
-          } else {
-            this.engine.flyToPosition(currentNode.position, Math.max(10, currentNode.position.length() * 0.4));
-          }
-          if (this.engine.onSelectObject) {
-            this.engine.onSelectObject({
-              type: 'star',
-              data: currentNode.data,
-              position: currentNode.position
-            });
-          }
+          const selection = this.engine.resolveSelection('star', cand.id);
+          if (!selection) return;
+          this.engine.focusObject('star', cand.id);
+          this.engine.onSelectObject?.(selection);
         });
 
         this.containerElem.appendChild(labelElem);

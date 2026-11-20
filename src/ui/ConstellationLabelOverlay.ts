@@ -56,20 +56,10 @@ export class ConstellationLabelOverlay {
 
         labelElem.addEventListener('click', (e) => {
           e.stopPropagation();
-          const currentCentroid = this.calculateCentroid(constellation);
-          if (!currentCentroid) return;
-          if (this.engine.viewMode === 'realistic') {
-            this.engine.focusSkyDirection(currentCentroid, 35);
-          } else {
-            this.engine.flyToPosition(currentCentroid, Math.max(15, currentCentroid.length() * 0.5));
-          }
-          if (this.engine.onSelectObject) {
-            this.engine.onSelectObject({
-              type: 'constellation',
-              data: constellation,
-              position: currentCentroid
-            });
-          }
+          const selection = this.engine.resolveSelection('constellation', constellation.id);
+          if (!selection) return;
+          this.engine.focusObject('constellation', constellation.id);
+          this.engine.onSelectObject?.(selection);
         });
 
         this.containerElem.appendChild(labelElem);

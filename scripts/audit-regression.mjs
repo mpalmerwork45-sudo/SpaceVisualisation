@@ -110,6 +110,34 @@ try {
     return { east: east.x, west: west.x, imageU: [left, right] };
   });
 
+  results.modeFocus = await page.evaluate(() => {
+    const e = engine;
+    click('btn-view-sol');
+    search('M31'); snap();
+    const linearRadius = e.cameraRadius;
+    click('btn-mode-log');
+    const object = e.resolveSelection('deepSpace', 'andromeda_m31');
+    check(e.cameraTarget.distanceTo(object.position) < 1e-10, 'switching maps keeps the camera on Andromeda');
+    check(e.cameraRadius < linearRadius / 100, 'the new camera radius uses the logarithmic map scale');
+    click('btn-mode-real');
+    const skyDirection = e.resolveSelection('deepSpace', 'andromeda_m31').position.normalize();
+    check(e.camera.getWorldDirection(new THREE.Vector3()).angleTo(skyDirection) < 1e-6, 'switching to the angular sky keeps Andromeda in view');
+    e.renderer.domElement.dispatchEvent(new WheelEvent('wheel', {deltaY:-100, cancelable:true}));
+    snap();
+    check(e.camera.fov < 5.7 && e.camera.position.lengthSq() === 0, 'sky wheel zoom narrows the field of view from Sol');
+    click('btn-mode-log');
+    check(e.cameraTarget.distanceTo(object.position) < 1e-10, 'switching back from the sky restores the focused map object');
+
+    click('btn-top-g-pole'); snap();
+    const before = e.camera.getWorldDirection(new THREE.Vector3());
+    const position = e.camera.position.clone();
+    click('btn-turn-180'); e.updateCameraPosition();
+    const turnAngle = before.angleTo(e.camera.getWorldDirection(new THREE.Vector3()));
+    check(Math.abs(turnAngle - Math.PI) < 1e-7 && e.camera.position.equals(position), 'Turn 180 reverses even a polar sightline in place');
+    click('btn-close-modal');
+    return { turnDegrees: THREE.MathUtils.radToDeg(turnAngle) };
+  });
+
   results.selectionAndFilters = await page.evaluate(() => {
     click('btn-view-sol');
     document.querySelector('[data-class="G"]').click();
@@ -217,6 +245,10 @@ try {
   const beforePinch = await page.evaluate(() => engine.targetCameraRadius);
   await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints});
   await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[touchPoints[0],{x:1180,y:430,id:2}]});
+  await page.evaluate(before => {
+    engine.updateCameraPosition();
+    check(engine.pointers.size === 2 && engine.camera.position.length() < before * .9, 'pinch zoom updates the camera while both fingers are down');
+  }, beforePinch);
   await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
   results.pointer = await page.evaluate(before => {
     check(engine.targetCameraRadius < before*.9,'8: two-finger pinch zooms the view');

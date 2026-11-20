@@ -1,8 +1,8 @@
 import { SpaceEngine, ObjectSelection } from '../engine/SpaceEngine';
-import { STARS_CATALOG, StarData } from '../data/stars';
+import { STARS_CATALOG } from '../data/stars';
 import { PLANET_EPHEMERIS } from '../utils/ephemeris';
-import { DEEP_SPACE_OBJECTS, DeepSpaceObjectData } from '../data/deepSpace';
-import { angularDiameterToWorldSize, getSpectralCssColor, scaleDistance } from '../utils/coordinates';
+import { DEEP_SPACE_OBJECTS } from '../data/deepSpace';
+import { getSpectralCssColor } from '../utils/coordinates';
 import { AudioEngine } from './AudioEngine';
 import { StarLabelOverlay } from './StarLabelOverlay';
 import { ConstellationLabelOverlay } from './ConstellationLabelOverlay';
@@ -267,7 +267,8 @@ export class UIManager {
       radText = au < 0.1 ? `${(au * 149597870).toLocaleString(undefined, { maximumFractionDigits: 0 })} km` : `${au.toFixed(2)} AU`;
     }
 
-    readout.textContent = `Pitch: ${pitchDeg}° | Yaw: ${yawDeg}° | Roll: ${rollDeg}° | View Scale: ${radText}`;
+    const location = this.engine.viewMode === 'realistic' ? 'Observer at Sol' : `View Scale: ${radText}`;
+    readout.textContent = `Pitch: ${pitchDeg}° | Yaw: ${yawDeg}° | Roll: ${rollDeg}° | ${location}`;
   }
 
   private syncEngineControls() {
@@ -609,9 +610,8 @@ export class UIManager {
     if (star) {
       // Search is catalogue-wide: reveal an explicitly requested filtered star.
       if (!matchesSpectralFilter(star, this.engine.spectralFilter)) this.engine.setSpectralFilter('ALL');
-      const selection = this.engine.resolveSelection('star', id)!;
-      this.focusStarObject(star, selection.position);
-      this.showDetailModal(selection);
+      this.engine.focusObject('star', id);
+      this.showDetailModal(this.engine.resolveSelection('star', id)!);
       return;
     }
 
@@ -626,45 +626,9 @@ export class UIManager {
 
     const dsoNode = this.engine.deepSpaceRenderer.objectsMap.get(id);
     if (dsoNode) {
-      this.focusDeepSpaceObject(dsoNode.data, dsoNode.position);
-      this.showDetailModal({ type: 'deepSpace', data: dsoNode.data, position: dsoNode.position });
-      return;
+      this.engine.focusObject('deepSpace', id);
+      this.showDetailModal(this.engine.resolveSelection('deepSpace', id)!);
     }
-  }
-
-  private focusStarObject(data: StarData, position: Vector3) {
-    if (data.id === 'sol') {
-      this.engine.setPresetViewpoint('sol_center');
-      return;
-    }
-    if (this.engine.viewMode === 'realistic') {
-      this.engine.focusSkyDirection(position, 12);
-      return;
-    }
-    this.engine.flyToPosition(position, Math.max(10, scaleDistance(data.dist, this.engine.viewMode) * 0.5));
-  }
-
-  private focusDeepSpaceObject(data: DeepSpaceObjectData, position: Vector3) {
-    const angularSize = data.galaxy?.majorArcmin ?? data.angularSizeArcmin;
-
-    if (this.engine.viewMode === 'realistic') {
-      this.engine.focusSkyObject(position, angularSize);
-      return;
-    }
-
-    const renderedDiameter = angularDiameterToWorldSize(angularSize, Math.max(position.length(), 0.001));
-    if (this.engine.viewMode === 'logarithmic') {
-      // Logarithmic mode keeps each object's catalogue angular size while
-      // compressing its distance. Focus from that rendered diameter.
-      this.engine.flyToPosition(position, Math.max(2, renderedDiameter * 1.4));
-      return;
-    }
-
-    const physicalDiameter = data.galaxy?.physicalDiameterLy;
-    const focusRadius = physicalDiameter
-      ? Math.max(20, physicalDiameter * 0.8)
-      : Math.max(0.5, renderedDiameter * 1.4);
-    this.engine.flyToPosition(position, focusRadius);
   }
 
   private bindEngineCallbacks() {
@@ -844,17 +808,7 @@ export class UIManager {
     `;
 
     document.getElementById('btn-fly-focus')!.addEventListener('click', () => {
-      const current = this.engine.resolveSelection(selection.type, d.id);
-      if (!current) return;
-      if (selection.type === 'deepSpace') {
-        this.focusDeepSpaceObject(d as DeepSpaceObjectData, current.position);
-      } else if (selection.type === 'star') {
-        this.focusStarObject(d as StarData, current.position);
-      } else if (selection.type === 'constellation' && this.engine.viewMode === 'realistic') {
-        this.engine.focusSkyDirection(current.position, 35);
-      } else {
-        this.engine.flyToPosition(current.position, 15);
-      }
+      if (selection.type) this.engine.focusObject(selection.type, d.id);
     });
 
     this.modalElem.classList.remove('hidden');

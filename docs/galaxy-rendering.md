@@ -117,8 +117,8 @@ These conventions are not physiological or telescope calibrations.
 Changing coordinate alignment transforms the current and target camera anchors,
 orbit directions, up vector and all planetary/orbital geometry together, preserving
 physical position, heading and zoom. Selection actions resolve catalogue IDs in
-the current mode and frame, so an open information panel never centres on stale
-coordinates. Spectral filters persist through rebuilds; explicit search reveals
+the current mode and frame. Switching modes reframes the focused catalogue object
+at the new distance or angular scale. Spectral filters persist through rebuilds. Explicit search reveals
 a filtered-out star by clearing the incompatible filter. Brown dwarfs group L/T/Y.
 
 Startup and the Sol Planetary Zoom preset centre on Sol at 0.0003 ly (~19 AU),
@@ -147,7 +147,8 @@ Sky-object inspection can narrow below one degree to resolve compact nebulae.
 Above / Level / Below change the orbit elevation around the current focus,
 preserving distance and heading. The logarithmic field-of-view slider ranges
 from 0.05° for compact-object inspection to 90° for wide views, independently
-of orbit distance. Existing pitch, yaw, roll and drag controls remain available.
+of orbit distance. In Realistic Sky, the observer stays at Sol and the wheel and
+pinch controls change the field of view. Turn 180° reverses the sightline in place.
 
 ## Planet inspection
 
