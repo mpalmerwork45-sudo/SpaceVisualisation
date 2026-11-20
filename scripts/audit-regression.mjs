@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { checkCatalogueModels } from './catalogue-render-check.mjs';
 
 // Run against a Vite dev server: AUDIT_URL=http://127.0.0.1:5179 npm run test:browser
 // CHROME_PATH can use an installed browser instead of Playwright's Chromium.
@@ -18,6 +19,28 @@ page.on('console', message => {
   if (message.type() === 'error' && !message.text().includes('favicon')) errors.push(message.text());
 });
 const results = {};
+async function captureView(name) {
+  // The audit pauses animation. Copy the last draw before Chromium clears
+  // the non-preserved WebGL buffer while Playwright captures the DOM overlay.
+  const still = await page.evaluateHandle(() => {
+    draw();
+    const frame = document.createElement('canvas');
+    const source = engine.renderer.domElement;
+    frame.width = source.width;
+    frame.height = source.height;
+    frame.style.cssText = 'position:absolute;inset:0;pointer-events:none';
+    frame.getContext('2d').drawImage(source, 0, 0);
+    source.after(frame);
+    return frame;
+  });
+  try {
+    await page.screenshot({ path: `${output}/${name}.png` });
+  } finally {
+    await still.evaluate(frame => frame.remove());
+    await still.dispose();
+  }
+}
+
 try {
   await page.goto(process.env.AUDIT_URL || 'http://127.0.0.1:5179', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('canvas');
@@ -478,6 +501,8 @@ try {
     }
   });
 
+  results.catalogueModels = await checkCatalogueModels(page, output);
+
   results.eyeAdaptation = await page.evaluate(() => {
     const e = engine;
     click('btn-view-sol');
@@ -538,6 +563,27 @@ try {
     return { before, after };
   });
 
+  await page.evaluate(() => {
+    click('btn-view-sol');
+    engine.setSimulationDate(new Date('2025-04-20T12:00:00Z'));
+    document.getElementById('orientation-options').open = false;
+    document.getElementById('navigation-options').open = false;
+    search('Earth');
+    snap();
+  });
+  await captureView('earth-inspection');
+  await page.evaluate(() => {
+    click('btn-mode-real');
+    engine.setObservationMode('enhancedOptical');
+    search('Ring Nebula');
+    snap();
+  });
+  await captureView('ring-nebula-inspection');
+  await page.evaluate(() => {
+    click('btn-close-modal');
+    engine.setSimulationDate(new Date());
+  });
+
   results.layout = [];
   for (const width of [1920,1280,768,390,320]) {
     await page.setViewportSize({width,height:width < 700 ? 844 : 800});
@@ -566,7 +612,7 @@ try {
       return {width:innerWidth,boxes,expandedHeight:openHeight};
     });
     results.layout.push(dimensions);
-    if (width === 1280 || width === 390) { await page.evaluate(() => draw()); await page.screenshot({path:`${output}/solar-${width}.png`}); }
+    if (width === 1280 || width === 390) await captureView(`solar-${width}`);
   }
   await page.setViewportSize({width:390,height:844});
   await page.evaluate(() => { search('Earth'); snap(); });

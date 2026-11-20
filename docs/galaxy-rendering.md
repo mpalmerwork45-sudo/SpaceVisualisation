@@ -30,17 +30,21 @@ catalogue values are deliberately explicit and test their physical
 diameter/distance consistency; they are suitable visual inputs, not a claim
 that every isophotal definition is identical across surveys.
 
-The shader integrates along the sightline through an inclined ellipsoid. The
-observed minor-to-major axis ratio and inclination set its polar depth. The
-volume includes these components.
+The shader integrates 36 segments along the sightline through an inclined
+ellipsoid. The observed axis ratio and inclination determine its polar depth.
+A rounder Sérsic-like bulge sits inside a thicker disc of old stars. Young
+stars, ionized gas and dust occupy thinner layers. Each galaxy has a cached
+256 × 256 density map for those four components. Mipmapping blends small
+associations together as their apparent size falls below a pixel. Integrated
+V magnitude and the catalogue's angular area set the brightness scale.
 
-- a Sérsic-like stellar bulge with a rounder profile than the disc
-- a flattened exponential stellar disc
-- logarithmic spiral arms and stellar bars where the morphology calls for them
-- deterministic density variations for clumps and irregular structure
-- a thinner absorbing dust layer
-- a mean surface-brightness scale derived from integrated V magnitude and the
-  catalogue's elliptical angular area
+Andromeda has an off-centre dust ring. Triangulum has looser arms dotted with
+star-forming regions. Sombrero's dust ring crosses its bright central bulge.
+The Large Magellanic Cloud has a displaced bar, and the Small Magellanic Cloud
+has an extended wing. The ray marcher follows absorption through each layer as
+the observer orbits the galaxy. Observational references include
+[Andromeda's dust ring](https://svs.gsfc.nasa.gov/30990/) and
+[Triangulum's star-forming regions](https://science.nasa.gov/mission/hubble/science/explore-the-night-sky/hubble-messier-catalog/messier-33/).
 
 Each galaxy uses a single volume for angular and close orbital views. Ray
 integration uses the camera’s local position, including views from inside the
@@ -133,18 +137,21 @@ another orientation. The separate Galactic Pole top-view preset is unchanged.
 
 ## Deep-space object forms
 
-Nebulae use transparent 3D volumes with front-to-back integration, not square
-point sprites. Morphologies distinguish ionised planetary shells, supernova
-filaments, reflection clouds and dusty emission regions. The obscured Galactic
-nucleus is a faint cloud, not a visible sphere representing the black hole.
-These are illustrative models with catalogue positions and angular extents;
-small-scale gas structures are not measured reconstructions.
-Planetary-nebula rims have clumped shell structure; their compact central
-illuminators use an analytic sightline profile instead of relying on a volume
-sample to happen to hit a sub-step-size star.
+Each of the seven nebula entries has a distinct emission and absorption field.
+Orion has an open cavity and an illuminated gas front. Dense pillars absorb
+light in the Eagle, and a dust rift crosses the bubbles in Carina. The Ring
+has a hollow barrel, the Helix has shells in different planes, and the Crab
+has filaments surrounding a diffuse core. Illuminated dust sheets give the
+Pleiades their blue reflection nebulosity. The separate Galactic nucleus entry
+shows a dust-obscured cloud.
 
-Galaxy volumes include clumped arms, extinction reddening and star-forming
-knots. Orbiting a galaxy changes the projected disc and dust lanes.
+The renderer samples these illustrative structures along the viewer's sightline.
+The Ring Nebula's long axis is set to 60° east of north following the published
+[optical model of the main ring](https://www.spacetelescope.org/static/archives/releases/science_papers/heic1310a.pdf).
+Compact illuminators use an analytic profile so that a small change in angle
+does not move a star between gas samples. Search initially shows a nebula or
+galaxy from Sol's viewing direction and fits its extent to the shorter viewport
+dimension. Drag in either 3D map to inspect the shape from another angle.
 Catalogue stars remain unresolved points when narrowing the field of view.
 Sky-object inspection can narrow below one degree to resolve compact nebulae.
 
@@ -156,12 +163,22 @@ pinch controls change the field of view. Turn 180° reverses the sightline in pl
 
 ## Planet inspection
 
-Planets have procedural rocky terrain, cloud decks, gas-giant belts, ocean
-reflection and atmospheric rim shading. Saturn's ring shader includes radial
-structure, a Cassini-like division and the planet's shadow. Planet shading uses
-the direction to Sol, not the scene's general ambient lighting. Surface rotation
-is illustrative; neither terrain (including Earth coastlines) nor cloud motion
-is a measured planetary map or rotational ephemeris.
+Earth, Mars, Jupiter and Pluto have locally bundled image maps. Earth adds ocean
+glint and a separate moving cloud layer that casts shadows on the surface.
+The globe shader samples the cloud layer along each sightline. A thin outer
+shell completes the silhouette, keeping the clouds stable at close range.
+Each map loads when its planet first reaches 24 drawing-buffer pixels across.
+The other planets use procedural materials. Mercury's craters alter the lighting
+at grazing angles. Saturn's rings have gaps and varying opacity and cast a
+shadow across the oblate globe. The globe in turn shadows the rings. Inspection
+opens at an oblique angle to the sunlight so the terminator is visible.
+Image sources, resolutions and credits are listed in the [texture notes](../public/textures/README.md).
+
+Equatorial and polar radii set each figure's flattening. The selected date sets
+the surface orientation using a fixed pole and constant spin rate. Imagery and
+displayed weather are illustrative for other epochs. Rotation omits precession
+and periodic corrections. The figure and rotation constants come from the
+[JPL planetary constants kernel](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc).
 
 Planet navigation and non-overlapping labels open a sunlit inspection view with
 diameter, orbital period, inclination and current computed heliocentric distance.
@@ -204,8 +221,11 @@ Set `AUDIT_URL` for a different server and `AUDIT_OUTPUT` for a different output
 directory (default `/tmp/space-visualisation-regression`). The suite checks
 coordinate/selection/filter consistency, magnitude visibility, selective picking,
 planet controls, keyboard/pointer/touch interactions, GPU resource stability,
-actual WebGL context recovery, and layouts from 320 to 1920 pixels wide. It writes
-screenshots and a JSON report. It needs a dev server because it instruments the
+actual WebGL context recovery, and layouts from 320 to 1920 pixels wide. It saves
+the interactive layout screenshots, a JSON report and three labelled WebGL
+contact sheets (`planets.png`, `galaxies.png` and `nebulae.png`). The sheets use
+Enhanced Exposure against black so each model can be inspected independently.
+The suite needs a dev server because it instruments the
 real engine without adding a production debug global.
 
 For repeatable visual/performance checks, run Vite and a local Chrome instance
